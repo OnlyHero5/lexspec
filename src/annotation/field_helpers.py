@@ -1,16 +1,16 @@
 """
-Field-Level Helpers for Annotation Consensus
-=============================================
-Utilities for extracting, parsing, and comparing the six fine-grained
-fields of a LegalTriplet during annotation consensus operations.
+标注共识用的字段级辅助函数
+==========================
+在标注共识过程中，从 LegalTriplet 的六个细粒度字段
+提取、解析与比较所用的工具。
 
-Exported:
-  - FIELD_SPEC:                       Definition of the 6 comparison fields
-  - _extract_field_values:            Extract field values from a LegalTriplet
-  - _parse_role:                      Parse role value into LegalRole enum
-  - _parse_condition_type:            Parse condition type into ConditionType enum
-  - _classify_disagreement_phenomenon: Map disagreement to linguistic category
-  - _triplets_equal:                  Check if two triplets are identical field-wise
+导出：
+  - FIELD_SPEC:                       6 个比较字段的定义
+  - _extract_field_values:            从 LegalTriplet 提取字段值
+  - _parse_role:                      将角色值解析为 LegalRole 枚举
+  - _parse_condition_type:            将条件类型解析为 ConditionType 枚举
+  - _classify_disagreement_phenomenon: 将分歧映射到语言现象类别
+  - _triplets_equal:                  判断两三元组在字段层面是否相同
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Fields compared at the finest grain (6 fields).
-# Each entry is a tuple of (field_name, parent_attribute, child_attribute).
-# This drives the field-by-field comparison loop.
+# 最细粒度比较的字段（6 个）。
+# 每项为 (field_name, parent_attribute, child_attribute) 元组。
+# 驱动逐字段比较循环。
 # ---------------------------------------------------------------------------
 
 FIELD_SPEC: List[Tuple[str, str, str]] = [
@@ -44,13 +44,13 @@ FIELD_SPEC: List[Tuple[str, str, str]] = [
 
 
 def _extract_field_values(triplet: LegalTriplet) -> Dict[str, Any]:
-    """Extract the 6 individual field values from a LegalTriplet.
+    """从 LegalTriplet 提取 6 个独立字段值。
 
-    Args:
-        triplet: A LegalTriplet instance.
+    参数：
+        triplet: LegalTriplet 实例。
 
-    Returns:
-        Dict mapping field names (e.g., "subject.text") to their values.
+    返回：
+        字段名（如 "subject.text"）到取值的 dict。
     """
     return {
         "subject.text":     triplet.subject.text,
@@ -67,13 +67,13 @@ def _extract_field_values(triplet: LegalTriplet) -> Dict[str, Any]:
 
 
 def _parse_role(value) -> LegalRole:
-    """Parse a role value (string or LegalRole enum) into a LegalRole.
+    """将角色值（字符串或 LegalRole 枚举）解析为 LegalRole。
 
-    Args:
-        value: A string like "obligor" or a LegalRole enum instance.
+    参数：
+        value: 如 "obligor" 的字符串或 LegalRole 枚举实例。
 
-    Returns:
-        LegalRole enum value. Defaults to LegalRole.OTHER if unrecognized.
+    返回：
+        LegalRole 枚举值。无法识别时默认为 LegalRole.OTHER。
     """
     if isinstance(value, LegalRole):
         return value
@@ -85,13 +85,13 @@ def _parse_role(value) -> LegalRole:
 
 
 def _parse_condition_type(value) -> ConditionType:
-    """Parse a condition type value into a ConditionType enum.
+    """将条件类型值解析为 ConditionType 枚举。
 
-    Args:
-        value: A string like "trigger" or a ConditionType enum instance.
+    参数：
+        value: 如 "trigger" 的字符串或 ConditionType 枚举实例。
 
-    Returns:
-        ConditionType enum value. Defaults to ConditionType.NONE if unrecognized.
+    返回：
+        ConditionType 枚举值。无法识别时默认为 ConditionType.NONE。
     """
     if isinstance(value, ConditionType):
         return value
@@ -109,43 +109,43 @@ def _classify_disagreement_phenomenon(
     qwen_anno: LegalTriplet,
     gemma_anno: LegalTriplet,
 ) -> str:
-    """Classify a field-level disagreement into a linguistic phenomenon.
+    """将字段级分歧归类为语言现象。
 
-    Maps the field and context of the disagreement to a meaningful
-    phenomenon label for reporting and diagnostics.
+    根据分歧字段与上下文映射为有意义的
+    现象标签，用于报告与诊断。
 
-    Args:
-        field: The field name that disagreed (e.g., "subject.role").
-        qwen_anno: The Qwen annotation (for context).
-        gemma_anno: The Gemma annotation (for context).
+    参数：
+        field: 不一致的字段名（如 "subject.role"）。
+        qwen_anno: Qwen 标注（供上下文）。
+        gemma_anno: Gemma 标注（供上下文）。
 
-    Returns:
-        A phenomenon label string (e.g., "role_mismatch", "passive_voice",
-        "condition_boundary", "object_identification").
+    返回：
+        现象标签字符串（如 "role_mismatch"、"passive_voice"、
+        "condition_boundary"、"object_identification"）。
     """
     if field == "subject.role":
-        # Role disagreements often stem from modality interpretation
-        # or passive/active voice confusion.
+        # 角色分歧常源于情态解读
+        # 或被动/主动语态混淆。
         return "role_assignment"
 
     elif field == "subject.text":
-        # Subject text disagreements may indicate different interpretations
-        # of who the actor is (e.g., passive voice agent confusion).
+        # 主语文本分歧可能表示对行为者
+        # 的不同解读（如被动语态施事混淆）。
         return "subject_identification"
 
     elif field == "action.predicate":
-        # Predicate disagreements indicate different interpretations of
-        # which verb is the main legal predicate.
+        # 谓词分歧表示对哪一动词为
+        # 主要法律谓词的不同解读。
         return "predicate_selection"
 
     elif field == "action.object":
-        # Object disagreements often stem from long-distance dependencies
-        # or scope ambiguity.
+        # 宾语分歧常源于长距离依存
+        # 或辖域歧义。
         return "object_identification"
 
     elif field in ("condition.text", "condition.type"):
-        # Condition disagreements indicate boundary detection issues
-        # or condition type classification differences.
+        # 条件分歧表示边界检测问题
+        # 或条件类型分类差异。
         return "condition_detection"
 
     else:
@@ -153,17 +153,17 @@ def _classify_disagreement_phenomenon(
 
 
 def _triplets_equal(a: LegalTriplet, b: LegalTriplet) -> bool:
-    """Check if two LegalTriplets are identical at the field level.
+    """判断两个 LegalTriplet 在字段层面是否相同。
 
-    Uses the same normalization as field_level_consensus to determine
-    equality, so surface-form differences (case, articles) are ignored.
+    使用与 field_level_consensus 相同的规范化判断相等，
+    因此忽略表面形式差异（大小写、冠词）。
 
-    Args:
-        a: First triplet.
-        b: Second triplet.
+    参数：
+        a: 第一个三元组。
+        b: 第二个三元组。
 
-    Returns:
-        True if all 6 fields agree after normalization, False otherwise.
+    返回：
+        规范化后 6 个字段均一致为 True，否则 False。
     """
     a_vals = _extract_field_values(a)
     b_vals = _extract_field_values(b)

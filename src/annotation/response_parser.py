@@ -1,13 +1,13 @@
 """
-LLM Response Parser for Annotation
-===================================
-Parses raw LLM text responses into LegalTriplet objects.
-Handles multiple output formats (pure JSON, markdown-fenced, etc.)
-and cleans up common model artifacts.
+标注用的 LLM 响应解析器
+=======================
+将原始 LLM 文本响应解析为 LegalTriplet 对象。
+处理多种输出格式（纯 JSON、Markdown 代码块等），
+并清理常见模型产物。
 
-Exported:
-  - strip_gemma_artifacts: Clean up common Gemma model output artifacts
-  - parse_llm_response:    Parse raw LLM response string into Optional[LegalTriplet]
+导出：
+  - strip_gemma_artifacts: 清理 Gemma 模型常见输出产物
+  - parse_llm_response:      将原始 LLM 响应解析为 Optional[LegalTriplet]
 """
 
 from __future__ import annotations
@@ -24,23 +24,23 @@ logger = get_logger(__name__)
 
 
 def strip_gemma_artifacts(text: str) -> str:
-    """Strip common non-JSON artifacts from Gemma model output.
+    """去除 Gemma 模型输出中的常见非 JSON 产物。
 
-    Gemma (especially the 31B variant) sometimes outputs markdown-formatted
-    content even when the prompt explicitly asks for JSON only. This function
-    cleans up as much of that as possible before JSON extraction is attempted.
+    Gemma（尤其 31B）有时即使提示要求仅 JSON，
+    仍会输出 Markdown 格式内容。本函数在尝试 JSON 提取前
+    尽可能清理这些内容。
 
-    Cleanup rules:
-      - Skip blank lines
-      - Strip bullet markers (*, -, * (bullet), 1.)
-      - Strip "Sentence:" / "Input:" echo lines
-      - Skip long prose lines that contain no JSON characters
+    清理规则：
+      - 跳过空行
+      - 去除项目符号（*、-、•、1.）
+      - 去除 "Sentence:" / "Input:" 回显行
+      - 跳过不含 JSON 字符的长散文行
 
-    Args:
-        text: Raw LLM response text.
+    参数：
+        text: 原始 LLM 响应文本。
 
-    Returns:
-        Cleaned-up text.
+    返回：
+        清理后的文本。
     """
     lines = text.split("\n")
     cleaned_lines: List[str] = []
@@ -51,14 +51,14 @@ def strip_gemma_artifacts(text: str) -> str:
         if not stripped:
             continue
 
-        # Strip bullet markers: "* text", "- text", "* (bullet) text", "1. text"
+        # 去除项目符号："* text"、"- text"、"* (bullet) text"、"1. text"
         bullet_match = re.match(
             r"^(?:\*|\-|•|\d+[.\)]\s*)(.*)$", stripped
         )
         if bullet_match:
             stripped = bullet_match.group(1).strip()
 
-        # Strip "Sentence:" / "Input:" / "Output:" echo lines.
+        # 去除 "Sentence:" / "Input:" / "Output:" 回显行。
         echo_match = re.match(
             r'^(?:Sentence|Input|Output|Clause)\s*:?\s*["\']?(.*)["\']?\s*$',
             stripped,
@@ -67,13 +67,13 @@ def strip_gemma_artifacts(text: str) -> str:
         if echo_match:
             inner = echo_match.group(1).strip()
             if inner.startswith("{"):
-                # Echo content happens to be JSON -- keep the JSON part.
+                # 回显内容恰为 JSON — 保留 JSON 部分。
                 stripped = inner
             else:
-                # Echoed the input sentence -- skip this line.
+                # 回显了输入句子 — 跳过该行。
                 continue
 
-        # Skip long prose lines that contain no JSON characters.
+        # 跳过不含 JSON 字符的长散文行。
         if "{" not in stripped and "}" not in stripped:
             if len(stripped) > 120 and '"' not in stripped:
                 continue
@@ -84,21 +84,21 @@ def strip_gemma_artifacts(text: str) -> str:
 
 
 def parse_llm_response(response: str) -> Optional[LegalTriplet]:
-    """Parse an LLM text response into a LegalTriplet.
+    """将 LLM 文本响应解析为 LegalTriplet。
 
-    Attempts four parsing strategies in priority order:
-      1. Pure JSON object:    {"subject": {...}, "action": {...}, ...}
-      2. Markdown code block: ```json ... ```
-      3. Regex JSON extract:  locate the first balanced {} object in text
-      4. JSON array:          [{"subject": {...}}, ...] -> take first element
+    按优先级依次尝试四种解析策略：
+      1. 纯 JSON 对象：    {"subject": {...}, "action": {...}, ...}
+      2. Markdown 代码块： ```json ... ```
+      3. 正则提取 JSON：  在文本中定位首个平衡的 {} 对象
+      4. JSON 数组：      [{"subject": {...}}, ...] -> 取首元素
 
-    Pre-processes the response with strip_gemma_artifacts() before parsing.
+    解析前用 strip_gemma_artifacts() 预处理响应。
 
-    Args:
-        response: Raw LLM response text.
+    参数：
+        response: 原始 LLM 响应文本。
 
-    Returns:
-        LegalTriplet if parsing succeeds, None otherwise.
+    返回：
+        解析成功返回 LegalTriplet，否则 None。
     """
     if not response or not response.strip():
         logger.warning("Empty LLM response during annotation parsing")
@@ -106,17 +106,17 @@ def parse_llm_response(response: str) -> Optional[LegalTriplet]:
 
     cleaned = response.strip()
 
-    # --- Preprocessing: strip common Gemma artifacts ---
+    # --- 预处理：去除 Gemma 常见产物 ---
     cleaned = strip_gemma_artifacts(cleaned)
 
-    # Strategy 1: Strip markdown code fences, then parse directly.
+    # 策略 1：去除 Markdown 代码围栏后直接解析。
     fence_pattern = r"```(?:json)?\s*\n?(.*?)\n?```"
     fence_match = re.search(fence_pattern, cleaned, re.DOTALL)
     if fence_match:
         cleaned = fence_match.group(1).strip()
         logger.debug("Extracted JSON from markdown code fence for annotation")
 
-    # Strategy 2: Direct JSON parse.
+    # 策略 2：直接 JSON 解析。
     try:
         data = json.loads(cleaned)
         result = coerce_to_triplet(data)
@@ -125,8 +125,8 @@ def parse_llm_response(response: str) -> Optional[LegalTriplet]:
     except json.JSONDecodeError:
         pass
 
-    # Strategy 3: Regex match for the first balanced-brace JSON object.
-    # Supports up to 3 levels of nesting, sufficient for LegalTriplet.
+    # 策略 3：正则匹配首个平衡花括号的 JSON 对象。
+    # 支持最多 3 层嵌套，足以覆盖 LegalTriplet。
     json_pattern = r"\{[^{}]*(?:\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}[^{}]*)*\}"
     for match in re.finditer(json_pattern, cleaned):
         try:
@@ -138,7 +138,7 @@ def parse_llm_response(response: str) -> Optional[LegalTriplet]:
         except json.JSONDecodeError:
             continue
 
-    # Strategy 4: Try parsing as a JSON array and take the first element.
+    # 策略 4：尝试解析为 JSON 数组并取首元素。
     try:
         data = json.loads(cleaned)
         if isinstance(data, list) and len(data) > 0:

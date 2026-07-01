@@ -1,8 +1,8 @@
 """
-Language phenomenon detection on UD dependency parse trees.
+基于 UD 依存 parse 树的语言现象检测。
 
-Each detection rule is based on UD v2 dependency relations, as described in
-the LexSpec design document sections 4.2-4.6.
+各检测规则基于 UD v2 依存关系，见
+LexSpec 设计文档 4.2–4.6 节。
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ from src.linguistic.passive_detector import PassiveDetector
 from src.extraction.schema import DependencyTree
 
 # ---------------------------------------------------------------------------
-# Non-substantive text filtering
+# 非实质性文本过滤
 # ---------------------------------------------------------------------------
 
-# Template text to exclude from sentence segmentation results
-# (headers, signatures, table of contents, etc.).
+# 分句结果中需排除的模板文本
+# （页眉、签名、目录等）。
 _BOILERPLATE_RE = re.compile(
     r"^(page\s+\d+|exhibit\s+[a-z0-9]+|schedule\s+[a-z0-9]+|"
     r"table of contents|signature page|in witness whereof|"
@@ -31,7 +31,7 @@ _BOILERPLATE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Columns to skip when loading CUAD spans.
+# 加载 CUAD 片段时跳过的列。
 _SKIP_COLUMNS = frozenset({
     "Filename", "Document Name", "Document Name-Answer",
     "Parties", "Parties-Answer",
@@ -39,31 +39,24 @@ _SKIP_COLUMNS = frozenset({
 
 
 # ======================================================================
-# Language phenomenon detection
+# 语言现象检测
 # ======================================================================
 
 
-def detect_phenomena(tree: DependencyTree) -> Dict[str, bool]:
-    """Detect language phenomena in a dependency parse tree.
+def detect_phenomena(
+    tree: DependencyTree,
+    long_distance_mdd: float,
+) -> Dict[str, bool]:
+    """在依存 parse 树中检测语言现象。
 
-    Detection logic:
-      - passive:         any verb has nsubj:pass or aux:pass relation
-      - conditional:     dep-level advcl + mark combination, or
-                         text-level lexical marker fallback
-      - relative_clause: acl:relcl relation present
-      - long_distance:   mean dependency distance exceeds threshold (6.0)
-      - negation:        neg relation present
-      - is_definition:   clause is a term definition ("X means Y" pattern)
-
-    Args:
-        tree: DependencyTree parsed from a single contract clause.
-
-    Returns:
-        Dict with boolean flags for each phenomenon.
+    参数：
+        tree: 单条合同条款解析得到的 DependencyTree。
+        long_distance_mdd: 来自 constraints.yaml
+            validation.long_distance_mdd 的平均依存距离阈值。
     """
     phenomena: Dict[str, bool] = {}
 
-    # --- Passive voice ---
+    # --- 被动语态 ---
     passive_detected = False
     for token in tree.find_tokens_by_upos("VERB"):
         if PassiveDetector.is_passive_loose(tree, token.index):
@@ -71,15 +64,15 @@ def detect_phenomena(tree: DependencyTree) -> Dict[str, bool]:
             break
     phenomena["passive"] = passive_detected
 
-    # --- Conditional clause: dependency detection (advcl + mark) ---
+    # --- 条件从句：依存检测（advcl + mark）---
     has_advcl = tree.has_deprel("advcl")
     has_mark = tree.has_deprel("mark")
     phenomena["conditional"] = has_advcl and has_mark
 
-    # --- Conditional clause: lexical fallback detection ---
-    # Some conditional clauses (especially those introduced by
-    # "if"/"unless"/"subject to") may not be parsed as advcl+mark
-    # by Stanza. Use lexical markers in text as fallback.
+    # --- 条件从句：词汇回退检测 ---
+    # 部分条件从句（尤其由 "if"/"unless"/"subject to" 引导的）
+    # 可能未被 Stanza 解析为 advcl+mark。
+    # 用文本中的词汇标记作回退。
     if not phenomena["conditional"]:
         text_lower = tree.text.lower()
         lexical_conditionals = [
@@ -94,51 +87,47 @@ def detect_phenomena(tree: DependencyTree) -> Dict[str, bool]:
                 phenomena["conditional"] = True
                 break
 
-    # --- Relative clause ---
+    # --- 关系从句 ---
     phenomena["relative_clause"] = tree.has_deprel("acl:relcl")
 
-    # --- Long-distance dependency (mean dependency distance > 6.0) ---
-    # Legal texts have naturally high MDD due to complex noun phrase
-    # structures. Threshold raised from 4.0 to 6.0 to capture genuine
-    # long-distance dependencies rather than normal legal syntactic
-    # complexity.
+    # --- 长距离依存（平均依存距离 > 阈值）---
     mdd = compute_mean_dependency_distance(tree)
-    phenomena["long_distance"] = mdd > 6.0
+    phenomena["long_distance"] = mdd > long_distance_mdd
 
-    # --- Negation ---
+    # --- 否定 ---
     phenomena["negation"] = tree.has_deprel("neg")
 
-    # --- Definition clause detection ---
+    # --- 定义性条款检测 ---
     phenomena["is_definition"] = _is_definition_clause(tree)
 
     return phenomena
 
 
 def _is_definition_clause(tree: DependencyTree) -> bool:
-    """Detect whether a clause is a term definition rather than an operative clause.
+    """判断条款是否为术语定义而非操作性条款。
 
-    Recognizes patterns:
+    识别模式：
       - "X means Y" / "X shall mean Y"
-      - '"Term" means ...' (quoted term + means)
-      - '1.4 "Term" means ...' (numbered + quoted term + definition)
+      - '"Term" means ...'（引号术语 + means）
+      - '1.4 "Term" means ...'（编号 + 引号术语 + 定义）
 
-    Args:
-        tree: DependencyTree parsed from a single contract clause.
+    参数：
+        tree: 单条合同条款解析得到的 DependencyTree。
 
-    Returns:
-        True if the clause is a definition.
+    返回：
+        若为定义性条款则为 True。
     """
     text = tree.text.strip()
     text_lower = text.lower()
 
-    # Pattern 1: "X means Y" -- subject is a quoted term or short noun phrase.
+    # 模式 1："X means Y" — 主语为引号术语或短名词短语。
     if re.search(r'\bmeans\b', text_lower):
         if text.startswith('"') or text[0].isdigit():
             return True
         if re.search(r'["\']?\w+["\']?\s+(?:shall\s+)?means?\b', text_lower):
             return True
 
-    # Pattern 2: Numbered + quoted term start (e.g. "1.4 'Term' means...").
+    # 模式 2：编号 + 引号术语开头（如 "1.4 'Term' means..."）。
     if re.match(r'^\d+\.\d+\s+["\']', text):
         return True
 
@@ -146,7 +135,7 @@ def _is_definition_clause(tree: DependencyTree) -> bool:
 
 
 def is_boilerplate_clause(text: str) -> bool:
-    """Heuristic filter for non-operative text fragments."""
+    """启发式过滤非操作性文本片段。"""
     t = text.strip()
     if len(t) < 15:
         return True

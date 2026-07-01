@@ -10,11 +10,11 @@ from enum import Enum
 
 class LegalRole(str, Enum):
     """
-    Legal role of the subject party in a contract clause.
+    合同条款中主体当事方的法律角色。
 
-    Determined from the combination of modality (shall/may/must not/agrees to)
-    and syntactic structure (active/passive, subject position).
-    Used by the UD validator to correct LLM-assigned roles.
+    由情态（shall/may/must not/agrees to）与句法结构
+    （主动/被动、主语位置）共同决定。
+    供 UD 校验器修正大语言模型分配的角色。
     """
     OBLIGOR = "obligor"
     RIGHT_HOLDER = "right_holder"
@@ -25,12 +25,12 @@ class LegalRole(str, Enum):
 
 class ConditionType(str, Enum):
     """
-    Semantic type of a condition clause attached to a legal action.
+    附加于法律动作的条件子句的语义类型。
 
-    - TEMPORAL:  Time-based condition (e.g., "within 30 days", "after Closing")
-    - TRIGGER:   Event-based precondition (e.g., "if Buyer defaults", "upon delivery")
-    - EXCEPTION: Carve-out from an obligation (e.g., "unless waived", "except as provided")
-    - NONE:      No condition present in the clause
+    - TEMPORAL:  时间条件（如 "within 30 days"、"after Closing"）
+    - TRIGGER:   事件前提（如 "if Buyer defaults"、"upon delivery"）
+    - EXCEPTION: 义务的例外情形（如 "unless waived"、"except as provided"）
+    - NONE:      子句中无条件
     """
     TEMPORAL = "temporal"
     TRIGGER = "trigger"
@@ -40,12 +40,12 @@ class ConditionType(str, Enum):
 
 class ValidationStatus(str, Enum):
     """
-    Outcome of the UD-based constraint validator on an LLM prediction.
+    基于 UD 的约束校验器对大语言模型预测的校验结果。
 
-    - VALID:              Prediction matches UD evidence; no corrections needed.
-    - CORRECTED:          Prediction had minor errors that were automatically fixed.
-    - REFLEXION_REQUIRED: Prediction has structural errors requiring LLM re-extraction
-                          (used as feedback in iterative Reflexion loops).
+    - VALID:              预测与 UD 证据一致；无需修正。
+    - CORRECTED:          预测有轻微错误且已自动修正。
+    - REFLEXION_REQUIRED: 预测有结构性错误，需大语言模型重新抽取
+                          （用作迭代 Reflexion 循环中的反馈）。
     """
     VALID = "VALID"
     CORRECTED = "CORRECTED"
@@ -54,15 +54,15 @@ class ValidationStatus(str, Enum):
 
 class ErrorCategory(str, Enum):
     """
-    Primary error category — the linguistic phenomenon causing the extraction error.
+    主要错误类别——导致抽取错误的语言学现象。
 
-    These map to specific UD syntactic patterns:
-    - PASSIVE_VOICE:            nsubj:pass instead of nsubj; object in subject position
-    - CONDITIONAL_BOUNDARY:     advcl/mark scope misidentified by LLM
-    - RELATIVE_CLAUSE:          acl:relcl embedding confused the extractor
-    - LONG_DISTANCE_DEPENDENCY: Dependency path > 3 edges between predicate and argument
-    - NEGATION_EXCEPTION:       Negation particle or "except/unless" altered the role
-    - OTHER_ERROR:              Catch-all for errors not fitting the above categories
+    对应具体 UD 句法模式：
+    - PASSIVE_VOICE:            使用 nsubj:pass 而非 nsubj；宾语位于主语位置
+    - CONDITIONAL_BOUNDARY:     advcl/mark 范围被大语言模型误识别
+    - RELATIVE_CLAUSE:          acl:relcl 嵌套使抽取器混淆
+    - LONG_DISTANCE_DEPENDENCY: 谓词与论元间依存路径超过 3 条边
+    - NEGATION_EXCEPTION:       否定词或 "except/unless" 改变了角色
+    - OTHER_ERROR:              不属于以上类别的兜底类别
     """
     PASSIVE_VOICE = "passive_voice"
     CONDITIONAL_BOUNDARY = "conditional_boundary"
@@ -74,9 +74,9 @@ class ErrorCategory(str, Enum):
 
 class FieldErrorType(str, Enum):
     """
-    Secondary error type — which field(s) of the LegalTriplet were affected.
+    次要错误类型——LegalTriplet 的哪些字段受到影响。
 
-    Used to cross-tabulate error rates by field and by linguistic phenomenon.
+    用于按字段与语言学现象交叉制表错误率。
     """
     SUBJECT = "subject"
     ROLE = "role"

@@ -89,7 +89,7 @@ def 运行Reflexion流水线(
 ) -> tuple[List[Dict], List[ValidationResult]]:
     """运行完整 Ours-Reflexion 流水线。
 
-    Returns:
+    返回:
         (最终结果字典列表, ValidationResult 列表) 元组。
     """
     config = 加载模型配置(config_path)

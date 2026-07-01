@@ -1,12 +1,12 @@
 """
-Statistical significance testing for experiment comparisons.
+实验比较的统计显著性检验。
 
-Methods:
-  - Paired bootstrap resampling (primary method) — bootstrap.py
-  - Wilcoxon signed-rank test (supplementary) — wilcoxon.py
-  - Multi-experiment comparison + stratified testing — comparisons.py
+方法:
+  - 配对 bootstrap 重采样（主方法）— bootstrap.py
+  - Wilcoxon 符号秩检验（补充）— wilcoxon.py
+  - 多实验比较 + 分层检验 — comparisons.py
 
-This module is a re-export facade that preserves the original import paths.
+本模块为再导出门面，保留原有导入路径。
 """
 
 from src.evaluation.bootstrap import paired_bootstrap

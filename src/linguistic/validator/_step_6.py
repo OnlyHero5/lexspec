@@ -1,7 +1,7 @@
 """
-Validation Step 6: Role Validation.
+校验步骤 6：角色校验。
 
-Validates subject.role against UD-derived legal role from modality/polarity analysis.
+根据情态/极性分析得到的 UD 推导法律角色，校验 subject.role。
 """
 
 from __future__ import annotations
@@ -28,46 +28,42 @@ def step6_validate_role(
     corrections: List[FieldCorrection],
     feedback_parts: List[str],
 ) -> bool:
-    """Step 6: Validate subject.role against UD-derived role.
+    """步骤 6：根据 UD 推导角色校验 subject.role。
 
-    The legal role is determined by modal auxiliary (shall/may/must)
-    and negation (not/no/never) patterns. This is the PolarityDetector's
-    primary function.
+    法律角色由情态助动词（shall/may/must）与
+    否定（not/no/never）模式确定。此为 PolarityDetector 的主要功能。
 
-    Role validation is generally the most reliable step because the
-    rules are deterministic: given an aux verb and negation status,
-    the role is uniquely determined (with the exception of "will"
-    which can be ambiguous between obligation and future tense).
+    角色校验通常是最可靠的步骤，因规则是确定性的：
+    给定助动词与否定状态，角色唯一确定
+    （"will" 除外，可能在义务与将来时之间歧义）。
 
-    Args:
-        llm_role: The LLM-assigned role.
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the predicate.
-        predicate_lemma: Lemma of the predicate (for lexical overrides).
-        polarity_detector: PolarityDetector instance.
-        corrections: List to append FieldCorrection objects to.
-        feedback_parts: List to append feedback strings to.
+    参数：
+        llm_role: 大语言模型分配的角色。
+        tree: 依存树。
+        predicate_idx: 谓词的 1 基索引。
+        predicate_lemma: 谓词词元（用于词项覆盖）。
+        polarity_detector: PolarityDetector 实例。
+        corrections: 追加 FieldCorrection 的列表。
+        feedback_parts: 追加反馈字符串的列表。
 
-    Returns:
-        True if the role matches.
+    返回：
+        角色匹配时返回 True。
     """
     ud_role, polarity = polarity_detector.detect(
         tree, predicate_idx, predicate_lemma
     )
 
     if ud_role == LegalRole.OTHER:
-        # UD cannot determine the role (no modal, no clear pattern).
-        # We accept whatever the LLM assigned — we have no evidence
-        # to contradict it.
+        # UD 无法确定角色（无情态、无清晰模式）。
+        # 接受大语言模型所赋角色 —— 无证据反驳。
         logger.debug("UD role is OTHER — accepting LLM role %s", llm_role.value)
         return True
 
     if llm_role == ud_role:
         return True
 
-    # Role mismatch: UD has a clear role, LLM assigned something different.
-    # This is almost always a correctable error because the role rules
-    # are deterministic.
+    # 角色不匹配：UD 有明确角色，大语言模型分配不同。
+    # 几乎总是可修正错误，因角色规则是确定性的。
     corrections.append(FieldCorrection(
         field="subject.role",
         original=llm_role.value,

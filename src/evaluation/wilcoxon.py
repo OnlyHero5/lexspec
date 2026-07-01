@@ -1,10 +1,10 @@
 """
-Wilcoxon signed-rank test as a supplementary significance test.
+Wilcoxon 符号秩检验 — 补充显著性检验。
 
-Classic non-parametric paired test. Less interpretable than bootstrap
-CIs but widely recognized in the NLP literature.
+经典非参数配对检验。可解释性弱于 bootstrap 置信区间，
+但在 NLP 文献中广泛认可。
 
-Theory reference:
+理论参考:
   - Dror et al. (2018). The Hitchhiker's Guide to Testing Statistical
     Significance in Natural Language Processing. ACL 2018.
 """
@@ -24,43 +24,38 @@ def wilcoxon_test(
     scores_a: List[float],
     scores_b: List[float],
 ) -> Dict[str, Any]:
-    """Wilcoxon signed-rank test as a supplementary significance test.
+    """Wilcoxon 符号秩检验 — 补充显著性检验。
 
-    This is a non-parametric paired difference test. Unlike the bootstrap,
-    it makes the assumption that the distribution of differences is symmetric
-    (which is usually reasonable for per-sample F1 scores).
+    非参数配对差异检验。与 bootstrap 不同，假设差值分布对称
+    （对逐样本 F1 通常合理）。
 
-    The test ranks the absolute differences between paired scores, sums
-    the ranks for positive and negative differences separately, and computes
-    a test statistic from the smaller rank sum.
+    对配对得分差的绝对值排序，分别对正、负差求秩和，
+    由较小秩和计算检验统计量。
 
-    Interpretation:
-      - p_value < 0.05: reject the null hypothesis that the median difference
-        is zero. Conclude that the two systems have significantly different
-        performance.
-      - The sign of the statistic indicates direction: positive means more
-        pairs favor B > A.
+    解读:
+      - p_value < 0.05：拒绝差值中位数为零的原假设，
+        认为两系统性能显著不同。
+      - 统计量符号表示方向：为正表示更多配对 favor B > A。
 
-    Note: This is a TWO-SIDED test (different from bootstrap which is one-sided
-    by default). For consistency in reporting, consider both results together.
+    注意：默认为双侧检验（bootstrap 默认可为单侧）。
+    报告时建议同时参考两种结果。
 
-    Args:
-        scores_a: Per-sample scores for system A (baseline).
-        scores_b: Per-sample scores for system B (treatment).
+    参数:
+        scores_a: 系统 A（基线）的逐样本得分。
+        scores_b: 系统 B（处理）的逐样本得分。
 
-    Returns:
-        Dict with keys:
-        - statistic: float — the Wilcoxon W statistic (the smaller of the
-          two rank sums).
-        - p_value: float — two-sided p-value.
-        - significant_at_0.05: bool — True if p_value < 0.05.
-        - n_pairs: int — number of paired samples.
-        - median_diff: float — median of the differences (B - A).
-        - method: str — "wilcoxon_signed_rank" for identification.
+    返回:
+        字典，键包括：
+        - statistic: float — Wilcoxon W 统计量（两个秩和中较小者）。
+        - p_value: float — 双侧 p 值。
+        - significant_at_0.05: bool — p_value < 0.05 时为 True。
+        - n_pairs: int — 配对样本数。
+        - median_diff: float — 差值 (B - A) 的中位数。
+        - method: str — 标识为 "wilcoxon_signed_rank"。
 
-    Raises:
-        ValueError: If scores have different lengths.
-        ImportError: If scipy is not installed.
+    异常:
+        ValueError: 两列得分长度不同。
+        ImportError: 未安装 scipy。
     """
     if len(scores_a) != len(scores_b):
         raise ValueError(
@@ -87,16 +82,16 @@ def wilcoxon_test(
             "Install it with: pip install scipy"
         )
 
-    # scipy's wilcoxon performs the paired signed-rank test.
-    # It tests H0: the distribution of (x - y) is symmetric about zero.
-    # By default it computes a two-sided p-value.
-    # We use method='approx' for faster computation (exact is infeasible for n > 25).
+    # scipy 的 wilcoxon 执行配对符号秩检验。
+    # 检验 H0：(x - y) 的分布关于零对称。
+    # 默认计算双侧 p 值。
+    # n > 25 时用 method='approx' 加速（精确法不可行）。
     result = scipy_wilcoxon(scores_b, scores_a, zero_method="wilcox", method="approx")
 
     statistic = float(result.statistic)
     p_value = float(result.pvalue)
 
-    # Compute median of differences for additional context.
+    # 计算差值中位数作为补充信息。
     diffs = np.array(scores_b) - np.array(scores_a)
     median_diff = float(np.median(diffs))
 

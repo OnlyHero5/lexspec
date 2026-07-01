@@ -1,9 +1,8 @@
 """
-Linguistic error classification — primary category determination.
+语言学错误分类 — 主类别判定。
 
-Analyzes the UD tree to determine which linguistic phenomenon caused the
-extraction error. Implements the 5 priority-ordered rules from the
-two-level classification system.
+分析 UD 树以确定导致抽取错误的语言学现象。
+实现两级分类体系中按优先级排序的 5 条规则。
 """
 
 from __future__ import annotations
@@ -21,37 +20,37 @@ def determine_primary_category(
     gold: LegalTriplet,
     tree: DependencyTree,
     field_errors: List[str],
+    long_distance_token_threshold: int,
 ) -> tuple[ErrorCategory, Dict[str, Any]]:
-    """Analyze UD tree to determine the linguistic phenomenon causing the error.
+    """分析 UD 树以确定导致错误的语言学现象。
 
-    Checks each phenomenon rule in priority order and returns the first match.
-    Collects UD evidence for generating the linguistic explanation.
+    按优先级依次检查各现象规则，返回首个匹配项。
+    收集 UD 证据供生成语言学解释。
 
-    Args:
-        prediction: System prediction.
-        gold: Gold standard.
-        tree: UD dependency tree.
-        field_errors: Pre-detected field errors.
+    参数:
+        prediction: 系统预测。
+        gold: 金标准。
+        tree: UD 依存树。
+        field_errors: 已检测的字段错误。
 
-    Returns:
-        Tuple of (primary ErrorCategory, dict of UD evidence for explanation).
+    返回:
+        (主 ErrorCategory, 解释用 UD 证据字典) 元组。
     """
     evidence: Dict[str, Any] = {}
 
     # -------------------------------------------------------------------
-    # Rule 1: Passive Voice Error
+    # 规则 1：被动语态错误
     # -------------------------------------------------------------------
-    # Check for passive voice: nsubj:pass identifies the patient (syntactic
-    # subject), which in passive voice is the logical object. The LLM may
-    # have extracted the patient instead of the real agent.
+    # 检测被动：nsubj:pass 标识受事（句法主语），
+    # 被动句中为逻辑宾语。LLM 可能抽取受事而非真施事。
     has_nsubj_pass = tree.has_deprel("nsubj:pass")
     has_aux_pass = tree.has_deprel("aux:pass")
     has_obl_agent = tree.has_deprel("obl:agent")
 
     if has_nsubj_pass and has_aux_pass:
-        # Passive voice detected. Check if the error involves the subject.
+        # 检测到被动。检查错误是否涉及主语。
         if any(e.startswith("subject") for e in field_errors):
-            # Collect evidence.
+            # 收集证据。
             nsubj_pass_tokens = tree.find_tokens_by_deprel("nsubj:pass")
             aux_pass_tokens = tree.find_tokens_by_deprel("aux:pass")
             obl_agent_tokens = tree.find_tokens_by_deprel("obl:agent")
@@ -76,13 +75,13 @@ def determine_primary_category(
             return ErrorCategory.PASSIVE_VOICE, evidence
 
     # -------------------------------------------------------------------
-    # Rule 2: Conditional Boundary Error
+    # 规则 2：条件边界错误
     # -------------------------------------------------------------------
     has_advcl = tree.has_deprel("advcl")
     has_mark = tree.has_deprel("mark")
 
     if has_advcl and has_mark:
-        # Condition clause exists. Check if error involves condition.
+        # 存在条件从句。检查错误是否涉及条件。
         if any(e.startswith("condition") for e in field_errors):
             advcl_tokens = tree.find_tokens_by_deprel("advcl")
             mark_tokens = tree.find_tokens_by_deprel("mark")
@@ -97,7 +96,7 @@ def determine_primary_category(
                 for t in mark_tokens
             ]
 
-            # Compute predicted vs UD condition span tokens for comparison.
+            # 计算预测与 UD 条件片段词元以便比较。
             for advcl_token in advcl_tokens:
                 span = tree.get_subtree_span(advcl_token.index)
                 evidence.setdefault("ud_condition_spans", []).append({
@@ -112,23 +111,21 @@ def determine_primary_category(
             return ErrorCategory.CONDITIONAL_BOUNDARY, evidence
 
     # -------------------------------------------------------------------
-    # Rule 3: Relative Clause Confusion
+    # 规则 3：关系从句混淆
     # -------------------------------------------------------------------
     has_relcl = tree.has_deprel("acl:relcl")
 
     if has_relcl:
-        # Check if the error might be due to relative clause confusion.
-        # This is harder to detect deterministically; we check if the
-        # predicate or object text tokens appear inside a relative clause.
+        # 检查是否可能由关系从句混淆导致。
+        # 确定性检测较难；检查谓词或宾语词元是否出现在关系从句内。
         relcl_tokens = tree.find_tokens_by_deprel("acl:relcl")
 
         for relcl_token in relcl_tokens:
             relcl_subtree = tree.get_subtree_tokens(relcl_token.index)
             relcl_lemma_set = {t.lemma.lower() for t in relcl_subtree}
 
-            # Check if the predicted predicate or object lemmas appear in
-            # a relative clause subtree. If so, the LLM may have extracted
-            # from the relative clause instead of the main clause.
+            # 检查预测谓词或宾语词形是否出现在关系从句子树中。
+            # 若是，LLM 可能从关系从句而非主句抽取。
             pred_lemma_set = set(normalize(prediction.action.predicate).lower().split())
             obj_lemma_set = set(normalize(prediction.action.object).lower().split())
 
@@ -153,25 +150,25 @@ def determine_primary_category(
                 return ErrorCategory.RELATIVE_CLAUSE, evidence
 
     # -------------------------------------------------------------------
-    # Rule 4: Long-distance Dependency Error
+    # 规则 4：长距离依存错误
     # -------------------------------------------------------------------
-    # Measure the dependency distance from the root predicate to its subject
-    # and object. If distance > 3 and there are errors on those arguments,
-    # classify as long-distance dependency error.
+    # 测量根谓词到主语、宾语的依存距离。
+    # 若超过 long_distance_token_threshold 且这些论元上有误，
+    # 归类为长距离依存错误。
     root_idx = tree.root_index
     if root_idx is not None:
         root_token = tree.get_token(root_idx)
         if root_token and root_token.upos == "VERB":
-            # Find subject and object dependents of the root.
+            # 查找根节点的主语、宾语依存子节点。
             subjects = tree.get_children(root_idx, deprel="nsubj") + tree.get_children(root_idx, deprel="nsubj:pass")
             objects = tree.get_children(root_idx, deprel="obj")
 
             max_distance = 0
-            # Check subject distance.
+            # 检查主语距离。
             for subj in subjects:
                 dist = tree.get_dependency_distance(subj.index, root_idx)
                 max_distance = max(max_distance, dist)
-                if dist > 3 and any(e.startswith("subject") for e in field_errors):
+                if dist > long_distance_token_threshold and any(e.startswith("subject") for e in field_errors):
                     evidence["long_distance_detected"] = True
                     evidence["distant_relation"] = f"nsubj(predicate, subject)"
                     evidence["distance"] = dist
@@ -184,11 +181,11 @@ def determine_primary_category(
                     }
                     return ErrorCategory.LONG_DISTANCE_DEPENDENCY, evidence
 
-            # Check object distance.
+            # 检查宾语距离。
             for obj in objects:
                 dist = tree.get_dependency_distance(obj.index, root_idx)
                 max_distance = max(max_distance, dist)
-                if dist > 3 and any(
+                if dist > long_distance_token_threshold and any(
                     e in field_errors for e in ["action.object", "action.predicate"]
                 ):
                     evidence["long_distance_detected"] = True
@@ -204,13 +201,13 @@ def determine_primary_category(
                     return ErrorCategory.LONG_DISTANCE_DEPENDENCY, evidence
 
     # -------------------------------------------------------------------
-    # Rule 5: Negation/Exception Error
+    # 规则 5：否定/例外错误
     # -------------------------------------------------------------------
     has_neg = tree.has_deprel("neg")
 
     if has_neg:
-        # Negation is present. Check if subject role is incorrect.
-        # Negation typically changes obligor → prohibited_party.
+        # 存在否定。检查主语角色是否错误。
+        # 否定通常将 obligor 变为 prohibited_party。
         if any(e.startswith("subject.role") for e in field_errors) or \
            any(e.startswith("subject") for e in field_errors):
             neg_tokens = tree.find_tokens_by_deprel("neg")
@@ -225,8 +222,7 @@ def determine_primary_category(
 
             return ErrorCategory.NEGATION_EXCEPTION, evidence
 
-    # Also check for exception conditions (condition type EXCEPTION that may
-    # have confused the role assignment).
+    # 另检查例外条件（EXCEPTION 类型可能混淆角色赋值）。
     if (
         gold.condition.type.value == "exception"
         and any(e.startswith("subject") for e in field_errors)
@@ -239,7 +235,7 @@ def determine_primary_category(
         return ErrorCategory.NEGATION_EXCEPTION, evidence
 
     # -------------------------------------------------------------------
-    # Fallback: Other Error
+    # 兜底：其他错误
     # -------------------------------------------------------------------
     evidence["no_specific_pattern"] = True
     evidence["field_errors"] = field_errors

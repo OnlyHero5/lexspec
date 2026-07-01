@@ -1,25 +1,25 @@
 """
-UD Feature Extraction
+UD 特征提取
 ======================
-Extracts syntactic features from UD dependency trees that directly map
-to the legal triplet fields (subject, action, condition).
+从 UD 依存树提取直接映射到法律三元组字段
+（主语、动作、条件）的句法特征。
 
-UD Relations Used (with linguistic justification):
+使用的 UD 关系（含语言学依据）：
 
-    nsubj       — Nominal subject (active voice actor).
-    obj         — Direct object (active voice patient).
-    nsubj:pass  — Passive nominal subject (surface subject, semantic patient).
-    obl:agent   — Oblique agent (by-phrase in passive, semantic actor).
-    advcl       — Adverbial clause modifier (condition/trigger candidate).
-    mark        — Clause marker (identifies if/unless/provided that).
-    acl:relcl   — Relative clause modifier (embedded modification).
-    aux         — Auxiliary verb (modality: shall/may/must).
-    aux:pass    — Passive auxiliary (be/get in passive construction).
-    neg         — Negation marker (not/never, polarity reversal).
-    xcomp       — Open clausal complement (control/raising).
-    ccomp       — Clausal complement (embedded clause object).
+    nsubj       —— 名词性主语（主动语态施事）。
+    obj         —— 直接宾语（主动语态受事）。
+    nsubj:pass  —— 被动名词性主语（表层主语，语义受事）。
+    obl:agent   —— 斜格施事（被动中的 by 短语，语义行为者）。
+    advcl       —— 状语从句修饰语（条件/触发候选）。
+    mark        —— 从句标记（识别 if/unless/provided that）。
+    acl:relcl   —— 关系从句修饰语（嵌入式修饰）。
+    aux         —— 助动词（情态：shall/may/must）。
+    aux:pass    —— 被动助动词（被动构造中的 be/get）。
+    neg         —— 否定标记（not/never，极性反转）。
+    xcomp       —— 开放从句补语（控制/提升）。
+    ccomp       —— 从句补语（嵌入式从句宾语）。
 
-Theory Source:
+理论来源：
   - Tesnière (1959). Éléments de syntaxe structurale.
   - de Marneffe & Manning (2014). Stanford Typed Dependencies Manual.
   - Universal Dependencies Guidelines v2. https://universaldependencies.org/u/dep/
@@ -63,32 +63,28 @@ from src.linguistic.ud_features._topology import (
 
 
 class UDFeatureExtractor:
-    """Extract syntactic features from UD dependency trees.
+    """从 UD 依存树提取与法律三元组相关的句法特征（静态方法集合）。
 
-    This class provides static/instance methods for navigating UD parse
-    trees and extracting the syntactic arguments relevant to legal triplet
-    construction. Every method cites its UD relation source and provides
-    a legal-domain example.
+    方法分组:
+        谓词: ``find_root_predicate``、``find_all_predicates``
+        论元: ``find_nsubj``、``find_obj``、``find_nsubj_pass``、``find_obl_agent``
+        从句: ``find_advcl_with_mark``
+        修饰: ``find_aux_verb``、``find_aux_pass``、``find_negation``、``has_acl_relcl``
+        拓扑: ``get_dependency_path``、``compute_mean_dependency_distance``
+        工具: ``get_noun_phrase_span``、``get_conjuncts``、``is_copular_construction``
 
-    These functions are the building blocks for the higher-level analysis
-    in PassiveDetector, ConditionExtractor, and PolarityDetector. They
-    operate directly on the DependencyTree model and never reference
-    Stanza internals.
-
-    Usage:
-        tree = parser.parse("Seller shall deliver the Goods.")
-        pred = UDFeatureExtractor.find_root_predicate(tree)
-        subj = UDFeatureExtractor.find_nsubj(tree, pred.index)
+    各静态方法的 ``参数``/``返回`` 说明见对应子模块实现
+    （``_predicate.py``、``_arguments.py`` 等）。
     """
 
     # ==================================================================
-    # Predicate Identification
+    # 谓词识别
     # ==================================================================
     find_root_predicate = staticmethod(_find_root_predicate)
     find_all_predicates = staticmethod(_find_all_predicates)
 
     # ==================================================================
-    # Subject Extraction — Active and Passive
+    # 主语提取 —— 主动与被动
     # ==================================================================
     find_nsubj = staticmethod(_find_nsubj)
     find_obj = staticmethod(_find_obj)
@@ -96,55 +92,55 @@ class UDFeatureExtractor:
     find_obl_agent = staticmethod(_find_obl_agent)
 
     # ==================================================================
-    # Clause Relations — advcl, xcomp, ccomp, acl:relcl
+    # 从句关系 —— advcl、xcomp、ccomp、acl:relcl
     # ==================================================================
     find_advcl_with_mark = staticmethod(_find_advcl_with_mark)
     _matches_marker = staticmethod(_matches_marker)
     _extract_condition_span_text = staticmethod(_extract_condition_span_text)
 
     # ==================================================================
-    # Auxiliary and Negation Detection
+    # 助动词与否定检测
     # ==================================================================
     find_aux_verb = staticmethod(_find_aux_verb)
     find_aux_pass = staticmethod(_find_aux_pass)
     find_negation = staticmethod(_find_negation)
 
     # ==================================================================
-    # Relative Clause Detection
+    # 关系从句检测
     # ==================================================================
     has_acl_relcl = staticmethod(_has_acl_relcl)
     find_acl_relcl_head = staticmethod(_find_acl_relcl_head)
 
     # ==================================================================
-    # Dependency Path and Distance Analysis
+    # 依存路径与距离分析
     # ==================================================================
     get_dependency_path = staticmethod(_get_dependency_path)
     compute_mean_dependency_distance = staticmethod(_compute_mean_dependency_distance)
     find_long_distance_dependencies = staticmethod(_find_long_distance_dependencies)
 
     # ==================================================================
-    # Coordination Handling
+    # 并列处理
     # ==================================================================
     get_conjuncts = staticmethod(_get_conjuncts)
     get_conjunct_text = staticmethod(_get_conjunct_text)
 
     # ==================================================================
-    # Utility: Find the full span of a noun phrase from its head
+    # 工具：从中心词获取名词短语完整跨度
     # ==================================================================
     get_noun_phrase_span = staticmethod(_get_noun_phrase_span)
 
     # ==================================================================
-    # Utility: Clause Type Classification
+    # 工具：从句类型分类
     # ==================================================================
     is_copular_construction = staticmethod(_is_copular_construction)
 
 
 # ======================================================================
-# Module-level convenience functions
+# 模块级便捷函数
 # ======================================================================
-# These re-export the static methods as module-level functions so that
-# callers can do `from src.linguistic.ud_features import find_nsubj`
-# without needing to reference the class. Both interfaces are supported.
+# 将静态方法再导出为模块级函数，使调用方可
+# `from src.linguistic.ud_features import find_nsubj`
+# 而无需引用类。两种接口均支持。
 
 find_root_predicate = UDFeatureExtractor.find_root_predicate
 find_nsubj = UDFeatureExtractor.find_nsubj

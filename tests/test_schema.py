@@ -1,4 +1,4 @@
-"""Basic tests for the core Pydantic models in src.extraction.schema."""
+"""src.extraction.schema 中核心 Pydantic 模型的基础测试。"""
 
 import pytest
 
@@ -15,7 +15,7 @@ from src.extraction.schema import (
 
 
 class TestSubject:
-    """Tests for the Subject model."""
+    """Subject 模型的测试。"""
 
     def test_creation_with_valid_role(self):
         subj = Subject(text="Seller", role=LegalRole.OBLIGOR)
@@ -32,7 +32,7 @@ class TestSubject:
 
 
 class TestAction:
-    """Tests for the Action model."""
+    """Action 模型的测试。"""
 
     def test_creation(self):
         action = Action(predicate="deliver", object="the Goods")
@@ -45,7 +45,7 @@ class TestAction:
 
 
 class TestCondition:
-    """Tests for the Condition model."""
+    """Condition 模型的测试。"""
 
     def test_defaults_to_none(self):
         cond = Condition()
@@ -59,7 +59,7 @@ class TestCondition:
 
 
 class TestToken:
-    """Tests for the Token model."""
+    """Token 模型的测试。"""
 
     def test_creation(self):
         tok = Token(
@@ -91,11 +91,11 @@ class TestToken:
 
 
 class TestDependencyTree:
-    """Tests for the DependencyTree model."""
+    """DependencyTree 模型的测试。"""
 
     @pytest.fixture
     def simple_tree(self):
-        """Build a minimal dependency tree for testing."""
+        """构建用于测试的最小依存树。"""
         tokens = [
             Token(index=1, text="Seller", lemma="seller", upos="NOUN", deprel="nsubj", head=3),
             Token(index=2, text="shall", lemma="shall", upos="AUX", deprel="aux", head=3),
@@ -132,16 +132,16 @@ class TestDependencyTree:
         assert subjects[0].text == "Seller"
 
     def test_get_head(self, simple_tree):
-        head = simple_tree.get_head(1)  # Head of "Seller" (index 1)
+        head = simple_tree.get_head(1)  # "Seller"（索引 1）的中心词
         assert head is not None
         assert head.index == 3
         assert head.text == "deliver"
 
     def test_get_head_of_root_returns_none(self, simple_tree):
-        assert simple_tree.get_head(3) is None  # root has no head
+        assert simple_tree.get_head(3) is None  # 根节点没有中心词
 
     def test_get_path_to_root(self, simple_tree):
-        path = simple_tree.get_path_to_root(1)  # From "Seller" up
+        path = simple_tree.get_path_to_root(1)  # 从 "Seller" 向上
         assert len(path) == 2
         assert path[0].text == "Seller"
         assert path[1].text == "deliver"
@@ -165,7 +165,7 @@ class TestDependencyTree:
         assert distance == 2
 
     def test_get_subtree_span(self, simple_tree):
-        span = simple_tree.get_subtree_span(3)  # entire tree under root
+        span = simple_tree.get_subtree_span(3)  # 根节点下的整棵子树
         assert "Seller" in span.text
         assert "deliver" in span.text
         assert "Goods" in span.text
@@ -176,7 +176,7 @@ class TestDependencyTree:
 
 
 class TestLegalTriplet:
-    """Tests for the LegalTriplet model — the core extraction output."""
+    """LegalTriplet 模型的测试——核心抽取输出。"""
 
     @pytest.fixture
     def sample_triplet(self):
@@ -208,13 +208,13 @@ class TestLegalTriplet:
         assert recreated.action.predicate == sample_triplet.action.predicate
 
     def test_condition_defaults_when_bare_condition(self):
-        """A bare Condition() has sensible defaults (empty text, NONE type)."""
+        """裸 Condition() 具有合理的默认值（空文本、NONE 类型）。"""
         cond = Condition()
         assert cond.text == ""
         assert cond.type == ConditionType.NONE
 
     def test_condition_is_required_field(self):
-        """LegalTriplet requires `condition` to be explicitly passed."""
+        """LegalTriplet 要求显式传入 `condition`。"""
         triplet = LegalTriplet(
             subject=Subject(text="Buyer", role=LegalRole.RIGHT_HOLDER),
             action=Action(predicate="terminate", object="the Agreement"),

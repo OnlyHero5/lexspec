@@ -1,5 +1,5 @@
 """
-Main detection interface for PolarityDetector.
+PolarityDetector 的主检测接口。
 """
 
 from __future__ import annotations
@@ -22,44 +22,42 @@ def detect(
     predicate_idx: int,
     predicate_lemma: str = "",
 ) -> Tuple[LegalRole, str]:
-    """Detect the legal role and polarity for the subject of a predicate.
+    """检测谓词主语的法律角色与极性。
 
-    Decision logic (ordered, first match wins):
+    决策逻辑（有序，先匹配者优先）：
 
-    1. Lexical override: If predicate_lemma is "indemnify", the subject
-       is INDEMNIFYING_PARTY regardless of modality. This is a legal
-       convention — indemnification carries a specific obligation class.
+    1. 词项覆盖：若 predicate_lemma 为 "indemnify"，主语为
+       INDEMNIFYING_PARTY，与情态无关。此为法律惯例 ——
+       赔偿义务属于特定义务类别。
 
-    2. Detect negation: Check if the predicate has a neg dependent
-       (neg relation) or if negative particles appear nearby.
+    2. 检测否定：检查谓词是否有 neg 依存，
+       或附近是否出现否定小品词。
 
-    3. Detect modal auxiliary: Find the aux verb (aux relation).
-       Extract the lemma form for rule matching.
+    3. 检测情态助动词：查找 aux 动词（aux 关系）。
+       提取词元形式供规则匹配。
 
-    4. Lookup in modality_rules: Map (aux_lemma, is_negated) -> LegalRole.
+    4. 在 modality_rules 中查找：映射 (aux_lemma, is_negated) -> LegalRole。
 
-    5. Fallback: If no modal is found, return OTHER.
-       This happens in clauses without modals:
-       - Bare present: "Seller delivers the Goods."
-       - Past tense: "Seller delivered the Goods."
-       - Infinitival complements: "Seller agrees to deliver..."
+    5. 回退：未找到情态时返回 OTHER。
+       见于无情态的从句：
+       - 一般现在时："Seller delivers the Goods."
+       - 过去时："Seller delivered the Goods."
+       - 不定式补语："Seller agrees to deliver..."
 
-    Args:
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the predicate.
-        predicate_lemma: Lemma form of the predicate verb (for
-                         lexical overrides like "indemnify").
+    参数：
+        tree: 依存树。
+        predicate_idx: 谓词的 1 基索引。
+        predicate_lemma: 谓词动词词元（用于 "indemnify" 等词项覆盖）。
 
-    Returns:
-        (LegalRole, polarity) tuple.
-        - role: Classified legal role enum.
-        - polarity: "positive" or "negative" string.
+    返回：
+        (LegalRole, polarity) 元组。
+        - role: 分类后的法律角色枚举。
+        - polarity: "positive" 或 "negative" 字符串。
     """
-    # Step 1: Lexical override for indemnification.
-    # "Indemnify" and its morphological variants always designate
-    # the subject as the indemnifying party. This overrides any
-    # modal-based classification because the legal semantics of
-    # indemnification are distinct from simple obligation.
+    # 步骤 1：赔偿义务的词项覆盖。
+    # "Indemnify" 及其形态变体始终将主语标为赔偿方。
+    # 覆盖任何基于情态的分类，因赔偿的法律语义
+    # 区别于简单义务。
     if predicate_lemma.lower() in ("indemnify", "indemnified"):
         logger.debug(
             "Lexical override: predicate '%s' -> INDEMNIFYING_PARTY",
@@ -67,25 +65,24 @@ def detect(
         )
         return (LegalRole.INDEMNIFYING_PARTY, "positive")
 
-    # Step 2: Detect negation.
+    # 步骤 2：检测否定。
     is_negated = self._is_negated(tree, predicate_idx)
     polarity = "negative" if is_negated else "positive"
 
-    # Step 3: Detect modal auxiliary.
+    # 步骤 3：检测情态助动词。
     modal_word, _ = detect_modality(self, tree, predicate_idx)
 
     if not modal_word:
-        # No modal auxiliary found.
-        # The predicate has no deontic marker — cannot determine role
-        # from syntax alone. This is common in definition clauses,
-        # recitals, and bare statements of fact.
+        # 未找到情态助动词。
+        # 谓词无道义标记 —— 仅凭句法无法确定角色。
+        # 常见于定义条款、鉴于条款与裸事实陈述。
         logger.debug(
             "No modal auxiliary found for predicate at index %d — "
             "role is OTHER", predicate_idx,
         )
         return (LegalRole.OTHER, polarity)
 
-    # Step 4: Lookup (modal, negated) -> role.
+    # 步骤 4：查找 (modal, negated) -> role。
     role = self._lookup.get((modal_word.lower(), is_negated))
 
     if role is not None:
@@ -95,10 +92,10 @@ def detect(
         )
         return (role, polarity)
 
-    # Step 5: The modal was found but doesn't match any rule.
-    # This could be a non-deontic modal (e.g., "can" for ability,
-    # "will" for future) or a modal not in our rule set.
-    # Default to OTHER — the validator will note this as uncertain.
+    # 步骤 5：找到情态但不匹配任何规则。
+    # 可能是非道义情态（如表能力的 "can"、表将来的 "will"），
+    # 或不在规则集中的情态。
+    # 默认为 OTHER —— 校验器将记为不确定。
     logger.debug(
         "Modal '%s' (negated=%s) does not match any rule — "
         "role is OTHER", modal_word, is_negated,
@@ -111,39 +108,38 @@ def detect_modality(
     tree: DependencyTree,
     predicate_idx: int,
 ) -> Tuple[str, str]:
-    """Detect the specific modal auxiliary and polarity.
+    """检测具体情态助动词与极性。
 
-    More granular than detect() — returns the actual modal word
-    for use in linguistic evidence and error explanations.
+    比 detect() 更细粒度 —— 返回实际情态词，
+    供语言学证据与错误说明使用。
 
-    This is used by:
-      - The validator's _build_linguistic_evidence() to populate
-        the modality_aux field.
-      - The error analyzer to explain role mismatches.
+    用于：
+      - 校验器 _build_linguistic_evidence() 填充 modality_aux 字段。
+      - 错误分析器解释角色不匹配。
 
-    Args:
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the predicate.
+    参数：
+        tree: 依存树。
+        predicate_idx: 谓词的 1 基索引。
 
-    Returns:
-        (modal_word, polarity) tuple.
-        - modal_word: The lemma of the modal auxiliary (e.g., "shall",
-          "may", "must"), or "" if no auxiliary found.
-        - polarity: "positive" or "negative" string.
+    返回：
+        (modal_word, polarity) 元组。
+        - modal_word: 情态助动词词元（如 "shall"、"may"、"must"），
+          无辅助动词时为空字符串。
+        - polarity: "positive" 或 "negative" 字符串。
     """
-    # Find the auxiliary verb (if any).
+    # 查找助动词（若有）。
     aux_token = find_aux_verb(tree, predicate_idx)
 
-    # Determine polarity from negation.
+    # 根据否定确定极性。
     is_negated = self._is_negated(tree, predicate_idx)
     polarity = "negative" if is_negated else "positive"
 
     if aux_token is None:
         return ("", polarity)
 
-    # Use the lemma form for consistent rule matching.
-    # Stanza lemmatizes modals to their canonical form:
-    # "must" -> "must", "shall" -> "shall", "may" -> "may".
+    # 使用词元形式以一致匹配规则。
+    # Stanza 将情态还原为规范形式：
+    # "must" -> "must"，"shall" -> "shall"，"may" -> "may"。
     modal_word = aux_token.lemma.lower() if aux_token.lemma else aux_token.text.lower()
 
     logger.debug(
@@ -161,43 +157,41 @@ def detect_role_with_voice(
     predicate_lemma: str = "",
     is_passive: bool = False,
 ) -> LegalRole:
-    """Detect legal role, accounting for passive voice.
+    """检测法律角色，考虑被动语态。
 
-    In passive constructions, the surface subject is the patient,
-    not the agent. The role (obligor, etc.) should be assigned to
-    the semantic AGENT (obl:agent), not the surface subject.
+    被动构造中，表层主语为受事而非施事。
+    角色（义务方等）应赋给语义施事（obl:agent），
+    而非表层主语。
 
-    This method handles that correctly by:
-      1. For active voice: role applies to nsubj (surface subject = agent).
-      2. For passive voice: role applies to obl:agent (semantic agent).
-      3. For agentless passive: role cannot be determined — returns OTHER.
+    本方法正确处理：
+      1. 主动语态：角色适用于 nsubj（表层主语 = 施事）。
+      2. 被动语态：角色适用于 obl:agent（语义施事）。
+      3. 无施事被动：无法确定角色 —— 返回 OTHER。
 
-    Args:
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the predicate.
-        predicate_lemma: Lemma form of the predicate.
-        is_passive: Whether the predicate is in passive voice.
+    参数：
+        tree: 依存树。
+        predicate_idx: 谓词的 1 基索引。
+        predicate_lemma: 谓词词元。
+        is_passive: 谓词是否为被动语态。
 
-    Returns:
-        LegalRole enum value.
+    返回：
+        LegalRole 枚举值。
     """
     role, _ = detect(self, tree, predicate_idx, predicate_lemma)
 
     if not is_passive:
         return role
 
-    # In passive, check if the obl:agent exists.
-    # If the agent is expressed via obl:agent, the role applies
-    # to that agent. If agentless, the role is "free-floating"
-    # — we know what modality applies but not WHO it applies to.
+    # 被动语态下检查 obl:agent 是否存在。
+    # 若通过 obl:agent 表达施事，角色适用于该施事。
+    # 若无施事，角色「悬空」—— 知有情态但不知适用对象。
     agent = find_obl_agent(tree, predicate_idx)
     if agent is None:
-        # Agentless passive with a modality: e.g.,
+        # 带情态的无施事被动，例如
         # "All notices shall be delivered in writing."
-        # We know there's an obligation (shall), but the
-        # syntactic agent is not expressed.
-        # The LLM will need to infer from document context
-        # which party bears the obligation.
+        # 知有义务（shall），但句法施事未表达。
+        # 大语言模型需从文档上下文推断
+        # 哪方承担义务。
         logger.debug(
             "Agentless passive with modality — role cannot be "
             "assigned to a syntactic agent."
@@ -212,23 +206,23 @@ def get_modality_evidence(
     tree: DependencyTree,
     predicate_idx: int,
 ) -> dict:
-    """Extract all modality-related evidence for error analysis.
+    """提取情态相关证据供错误分析使用。
 
-    Returns a comprehensive dict of modality features used by
-    the error analyzer to explain role classification decisions.
+    返回情态特征的完整字典，供错误分析器
+    解释角色分类决策。
 
-    Args:
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the predicate.
+    参数：
+        tree: 依存树。
+        predicate_idx: 谓词的 1 基索引。
 
-    Returns:
-        Dict with keys:
-          - has_aux (bool): aux relation present
-          - aux_lemma (str): lemma of the auxiliary (if any)
-          - aux_text (str): surface text of the auxiliary
-          - is_negated (bool): negation detected
-          - polarity (str): "positive" or "negative"
-          - found_roles (list): all roles matching the (aux, neg) pair
+    返回：
+        含以下键的字典：
+          - has_aux (bool): 存在 aux 关系
+          - aux_lemma (str): 助动词词元（若有）
+          - aux_text (str): 助动词表层文本
+          - is_negated (bool): 检测到否定
+          - polarity (str): "positive" 或 "negative"
+          - found_roles (list): 匹配 (aux, neg) 对的全部角色
     """
     aux_token = find_aux_verb(tree, predicate_idx)
     is_negated = self._is_negated(tree, predicate_idx)
@@ -242,7 +236,7 @@ def get_modality_evidence(
         "matched_roles": [],
     }
 
-    # Check which roles match this (aux, negated) combination.
+    # 检查哪些角色匹配此 (aux, negated) 组合。
     if aux_token and aux_token.lemma:
         aux_lower = aux_token.lemma.lower()
         for (role_aux, role_neg), role in self._lookup.items():

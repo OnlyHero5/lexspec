@@ -1,10 +1,9 @@
 """
-Passive Voice Recovery Accuracy metric.
+被动语态恢复准确率指标。
 
-Evaluates whether the system correctly identifies the logical subject
-(obl:agent) in passive voice constructions. This is a known weakness
-of LLM extraction systems that tend to treat the syntactic subject
-(nsubj:pass, the patient) as the legal subject.
+评估系统是否在被动结构中正确识别逻辑主语（obl:agent）。
+LLM 抽取系统的已知弱点：常将句法主语（nsubj:pass，受事）
+当作法律主语。
 """
 
 from __future__ import annotations
@@ -23,43 +22,39 @@ def compute_passive_recovery_accuracy(
     trees: List[DependencyTree],
     gold: List[LegalTriplet],
 ) -> Dict[str, float]:
-    """Compute passive voice argument recovery accuracy.
+    """计算被动语态论元恢复准确率。
 
-    Passive voice in legal contracts is a known challenge for extraction:
-    in "The Price shall be paid by Buyer", the syntactic subject is "Price"
-    (nsubj:pass), but the legal agent (the obligated party) is "Buyer"
-    (obl:agent). LLM systems often incorrectly identify the patient as
-    the subject party.
+    法律合同中的被动语态是抽取难点：
+    在 "The Price shall be paid by Buyer" 中，句法主语为 "Price"
+    （nsubj:pass），法律施事（义务方）为 "Buyer"（obl:agent）。
+    LLM 常误将受事当作主体方。
 
-    This metric:
-      1. Identifies clauses where the UD tree detects passive voice
-         (presence of nsubj:pass AND aux:pass relations).
-      2. Checks whether the prediction correctly identifies the agent
-         (obl:agent) as the subject, rather than the patient.
-      3. Reports the recovery accuracy and false agent rate.
+    本指标：
+      1. 识别 UD 树检测到被动语的子句
+         （存在 nsubj:pass 与 aux:pass）。
+      2. 检查预测是否将施事（obl:agent）正确识别为主语，
+         而非受事。
+      3. 报告恢复准确率与假施事率。
 
-    Only evaluates on clauses where passive voice is actually detected —
-    active clauses are excluded from this metric.
+    仅在检测到被动语的子句上评估 — 主动句排除。
 
-    Args:
-        predictions: List of predicted LegalTriplets.
-        trees: List of DependencyTree objects (same length).
-        gold: List of gold-standard LegalTriplets (same length).
+    参数:
+        predictions: 预测 LegalTriplet 列表。
+        trees: DependencyTree 列表（等长）。
+        gold: 金标准 LegalTriplet 列表（等长）。
 
-    Returns:
-        Dict with keys:
-        - passive_count: int — number of passive clauses found.
-        - recovery_accuracy: float — proportion where the subject was
-          correctly identified as the agent (match with gold subject text
-          AND correct role).
-        - false_agent_rate: float — proportion where the prediction gave
-          the patient (nsubj:pass) as the subject when it should have been
-          the agent (obl:agent). This is the key error rate for passive voice.
-        - passive_f1_impact: float — F1 on the passive subset vs overall F1
-          baseline, showing how much passive voice degrades performance.
+    返回:
+        字典，键包括：
+        - passive_count: int — 被动子句数。
+        - recovery_accuracy: float — 主语被正确识别为施事的比例
+          （与金标主语文本匹配且角色正确）。
+        - false_agent_rate: float — 预测将受事（nsubj:pass）当作主语、
+          本应为施事（obl:agent）的比例。被动语态的关键错误率。
+        - passive_f1_impact: float — 被动子集 F1 相对总体 F1 的影响，
+          反映被动对性能的拖累。
 
-    Raises:
-        ValueError: If input lists have different lengths.
+    异常:
+        ValueError: 输入列表长度不一致。
     """
     n = len(predictions)
     if n != len(trees) or n != len(gold):
@@ -73,23 +68,23 @@ def compute_passive_recovery_accuracy(
     passive_gold_subjects: List[str] = []
     passive_pred_roles: List[str] = []
     passive_gold_roles: List[str] = []
-    passive_agent_tokens: List[Optional[str]] = []  # obl:agent text from tree
+    passive_agent_tokens: List[Optional[str]] = []  # 树中 obl:agent 文本
 
     for i, (pred, tree, g) in enumerate(zip(predictions, trees, gold)):
-        # Detect passive voice: requires both nsubj:pass and aux:pass.
+        # 检测被动：须同时有 nsubj:pass 与 aux:pass。
         has_nsubj_pass = tree.has_deprel("nsubj:pass")
         has_aux_pass = tree.has_deprel("aux:pass")
 
         if has_nsubj_pass and has_aux_pass:
             passive_indices.append(i)
 
-            # Collect prediction and gold subject info.
+            # 收集预测与金标主语信息。
             passive_pred_subjects.append(normalize(pred.subject.text))
             passive_gold_subjects.append(normalize(g.subject.text))
             passive_pred_roles.append(pred.subject.role.value)
             passive_gold_roles.append(g.subject.role.value)
 
-            # Extract the obl:agent token text from the tree (the true agent).
+            # 从树提取 obl:agent 词元文本（真施事）。
             agent_tokens = tree.find_tokens_by_deprel("obl:agent")
             agent_text = normalize(agent_tokens[0].text) if agent_tokens else None
             passive_agent_tokens.append(agent_text)
@@ -104,21 +99,21 @@ def compute_passive_recovery_accuracy(
             "passive_f1_impact": 0.0,
         }
 
-    # Compute recovery accuracy: was the correct agent identified?
+    # 计算恢复准确率：是否识别到正确施事？
     correct_recoveries = 0
     false_agent_count = 0
 
-    # Get nsubj:pass tokens for false agent detection.
+    # 获取 nsubj:pass 词元供假施事检测。
     for idx in passive_indices:
         pred = predictions[idx]
         tree = trees[idx]
         g = gold[idx]
 
-        # Check if subject text matches gold (normalized token-level).
+        # 检查主语文本是否与金标匹配（归一化词元级）。
         pred_text = normalize(pred.subject.text)
         gold_text = normalize(g.subject.text)
 
-        # Token overlap F1 for subject text recovery.
+        # 主语文本恢复的词元重叠 F1。
         pred_tokens = set(pred_text.split())
         gold_tokens = set(gold_text.split())
         if pred_tokens and gold_tokens:
@@ -127,19 +122,19 @@ def compute_passive_recovery_accuracy(
         else:
             f1 = 1.0 if not pred_tokens and not gold_tokens else 0.0
 
-        # Successful recovery: high token overlap with gold subject AND role matches.
+        # 成功恢复：与金标主语高词元重叠且角色匹配。
         if f1 >= 0.8 and pred.subject.role == g.subject.role:
             correct_recoveries += 1
 
-        # False agent detection: did the prediction use nsubj:pass (patient)
-        # as the subject? Check if pred subject matches the nsubj:pass text.
+        # 假施事检测：预测是否使用 nsubj:pass（受事）作为主语？
+        # 检查预测主语是否匹配 nsubj:pass 文本。
         nsubj_pass_tokens = tree.find_tokens_by_deprel("nsubj:pass")
         if nsubj_pass_tokens and pred_text:
             nsubj_pass_text = normalize(nsubj_pass_tokens[0].text)
             nsubj_pass_set = set(nsubj_pass_text.split())
             overlap = pred_tokens & nsubj_pass_set
             if overlap and len(overlap) / max(len(pred_tokens), 1) >= 0.5:
-                # Prediction mostly matches the patient — likely a false agent error.
+                # 预测主要匹配受事 — 可能为假施事错误。
                 false_agent_count += 1
 
     recovery_accuracy = correct_recoveries / passive_count
@@ -150,9 +145,9 @@ def compute_passive_recovery_accuracy(
         passive_count, recovery_accuracy, false_agent_rate,
     )
 
-    # Compute a rough F1 impact: F1 on passive subset vs overall.
-    # This is a simplified estimate; full computation requires per-sample F1.
-    passive_f1_impact = 0.0  # Reserved for integration with per-sample F1.
+    # 粗略 F1 影响：被动子集 F1 vs 总体。
+    # 简化估计；完整计算需逐样本 F1。
+    passive_f1_impact = 0.0  # 预留与逐样本 F1 集成。
 
     return {
         "passive_count": passive_count,

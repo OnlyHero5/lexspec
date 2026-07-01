@@ -1,28 +1,24 @@
 """
-LexSpec Evaluation Module
-=========================
+LexSpec 评估模块
+================
 
-Evaluates legal triplet extraction quality through three complementary dimensions:
+通过三个互补维度评估法律三元组抽取质量：
 
-1. **Weighted Triplet F1** (primary metric)
-   Decomposes extraction quality into 5 field-level scores with configurable
-   weights reflecting the relative importance of each component for legal
-   contract analysis.
+1. **加权三元组 F1**（主指标）
+   将抽取质量分解为 5 个字段级得分，权重可配置，反映各组成部分
+   对法律合同分析的相对重要性。
 
-2. **Linguistic Metrics** (supplementary dimension, per PDF requirement)
-   Four linguistic-specific metrics that diagnose performance on specific
-   syntactic phenomena: dependency path legality, passive voice recovery,
-   condition boundary IoU, and validator correction rates.
+2. **语言学指标**（补充维度，按 PDF 要求）
+   四项语言学专用指标，用于诊断特定句法现象上的表现：依存路径合法性、
+   被动语态恢复、条件边界 IoU，以及验证器修正率。
 
-3. **Error Analysis** (diagnostic dimension, per PDF requirement)
-   Two-level error classification (linguistic phenomenon x field error type)
-   with bilingual (Chinese + English) linguistic explanations citing specific
-   UD dependency relations.
+3. **错误分析**（诊断维度，按 PDF 要求）
+   两级错误分类（语言学现象 × 字段错误类型），附中英双语语言学解释，
+   并引用具体 UD 依存关系。
 
-Statistical significance testing (paired bootstrap + Wilcoxon) supports
-rigorous comparison between experiment variants.
+统计显著性检验（配对 bootstrap + Wilcoxon）支持实验变体之间的严格比较。
 
-Usage:
+用法:
     from src.evaluation import (
         normalize, normalize_triplet, load_party_aliases,
         compute_triplet_f1, compute_per_sample_f1,
@@ -32,26 +28,26 @@ Usage:
         save_error_cases, generate_error_summary,
     )
 
-    # Normalize text for fair comparison
+    # 归一化文本以便公平比较
     text = normalize("the Seller shall deliver the Goods.")
 
-    # Compute primary evaluation metric
+    # 计算主评估指标
     results = compute_triplet_f1(predictions, gold)
 
-    # Compute supplementary linguistic metrics
+    # 计算补充语言学指标
     ling_metrics = compute_all_linguistic_metrics(predictions, gold, trees)
 
-    # Run significance testing between experiments
+    # 在实验间运行显著性检验
     sig = paired_bootstrap(baseline_scores, our_scores)
 
-    # Classify and analyze errors
+    # 分类并分析错误
     errors = classify_errors(predictions, gold, trees)
     dist = error_distribution_report(errors)
     print(generate_error_summary(errors))
 """
 
 # ---------------------------------------------------------------------------
-# Text Normalization
+# 文本归一化
 # ---------------------------------------------------------------------------
 from src.evaluation.normalization import (
     normalize,
@@ -61,7 +57,7 @@ from src.evaluation.normalization import (
 )
 
 # ---------------------------------------------------------------------------
-# Weighted Triplet F1
+# 加权三元组 F1
 # ---------------------------------------------------------------------------
 from src.evaluation.triplet_f1 import (
     compute_triplet_f1,
@@ -69,11 +65,11 @@ from src.evaluation.triplet_f1 import (
 from src.evaluation.field_f1 import (
     compute_field_f1,
     compute_per_sample_f1,
-    DEFAULT_WEIGHTS,
+    load_f1_weights,
 )
 
 # ---------------------------------------------------------------------------
-# Linguistic Metrics
+# 语言学指标
 # ---------------------------------------------------------------------------
 from src.evaluation.dep_path_metrics import (
     compute_dependency_path_legality,
@@ -90,7 +86,7 @@ from src.evaluation.linguistic_metrics import (
 )
 
 # ---------------------------------------------------------------------------
-# Statistical Significance
+# 统计显著性
 # ---------------------------------------------------------------------------
 from src.evaluation.significance import (
     paired_bootstrap,
@@ -100,7 +96,7 @@ from src.evaluation.significance import (
 )
 
 # ---------------------------------------------------------------------------
-# Error Analysis
+# 错误分析
 # ---------------------------------------------------------------------------
 from src.evaluation.error_analyzer import (
     generate_error_report,
@@ -113,32 +109,32 @@ from src.evaluation.error_summary import (
 )
 
 # =============================================================================
-# Public API — everything callers should import from this module
+# 公开 API — 调用方应从此模块导入的全部符号
 # =============================================================================
 
 __all__ = [
-    # Normalization
+    # 归一化
     "normalize",
     "normalize_triplet",
     "load_party_aliases",
     "NUMBER_WORDS",
-    # Triplet F1
+    # 三元组 F1
     "compute_triplet_f1",
     "compute_field_f1",
     "compute_per_sample_f1",
-    "DEFAULT_WEIGHTS",
-    # Linguistic metrics
+    "load_f1_weights",
+    # 语言学指标
     "compute_dependency_path_legality",
     "compute_passive_recovery_accuracy",
     "compute_condition_iou",
     "compute_correction_rate",
     "compute_all_linguistic_metrics",
-    # Significance
+    # 显著性
     "paired_bootstrap",
     "wilcoxon_test",
     "run_all_comparisons",
     "stratified_significance",
-    # Error analysis
+    # 错误分析
     "generate_error_report",
     "classify_errors",
     "error_distribution_report",

@@ -1,13 +1,13 @@
 """
-Condition Clause Boundary Extraction
+条件从句边界提取
 =====================================
-Extracts condition/exception/temporal clauses from UD dependency trees
-by identifying advcl+mark patterns and extracting full subtree spans.
+通过识别 advcl+mark 模式并从完整子树跨度提取，
+从 UD 依存树中提取条件/例外/时间从句。
 
-Submodules:
-  _marker_config:   Fallback taxonomy, YAML config loading, marker list
-  _extractor:       Primary extraction interface (extract, extract_all, classify)
-  _overlap:         Condition span overlap calculation
+子模块：
+  _marker_config:   回退分类体系、YAML 配置加载、标记词列表
+  _extractor:       主提取接口（extract、extract_all、classify）
+  _overlap:         条件跨度重叠计算
 """
 
 from __future__ import annotations
@@ -28,26 +28,27 @@ from src.linguistic.condition._overlap import (
 
 
 class ConditionExtractor:
-    """Extract and classify condition clauses from UD dependency trees.
+    """从 UD 依存树提取并分类条件从句。
 
-    Loads condition marker taxonomy from configs/constraints.yaml and
-    uses advcl+mark UD patterns to identify condition clause boundaries.
-    Classifies conditions into TRIGGER, TEMPORAL, or EXCEPTION based on
-    the mark word and the legal-domain taxonomy.
+    从 configs/constraints.yaml 加载条件标记词分类体系，
+    使用 advcl+mark UD 模式识别条件从句边界。
+    根据标记词与法律领域分类体系将条件分为
+    TRIGGER、TEMPORAL 或 EXCEPTION。
 
-    This module is used by the validator (Step 5) to:
-      1. Check if the LLM correctly identified the presence/absence of a condition.
-      2. Validate the condition clause boundary (span accuracy).
-      3. Classify error types: condition omission, over-extraction, boundary error.
+    校验器（步骤 5）使用本模块以：
+      1. 检查大语言模型是否正确识别条件的存在/缺失。
+      2. 校验条件从句边界（跨度准确性）。
+      3. 分类错误类型：条件遗漏、过度抽取、边界错误。
 
-    Usage:
+    使用示例::
+
         extractor = ConditionExtractor("configs/constraints.yaml")
         spans = extractor.extract_all(tree, predicate_idx)
         if spans:
             print(f"Found {spans[0].condition_type} condition: {spans[0].text}")
     """
 
-    # Imported from submodules — bound as instance/static methods:
+    # 从子模块导入 —— 绑定为实例/静态方法：
     _load_markers = _load_markers_fn
     _parse_markers_section = staticmethod(_parse_markers_section_fn)
     extract = _extract_fn
@@ -57,15 +58,14 @@ class ConditionExtractor:
     is_condition_in_main_clause = staticmethod(_is_condition_in_main_clause_fn)
 
     def __init__(self, constraints_path: str = "configs/constraints.yaml"):
-        """Initialize with constraints configuration.
+        """从约束 YAML 加载条件标记词并初始化提取器。
 
-        Args:
-            constraints_path: Path to constraints YAML configuration file.
-                             Must exist and be well-formed — no fallback.
+        参数:
+            constraints_path: 约束配置文件路径，须含 ``condition_markers`` 节。
 
-        Raises:
-            FileNotFoundError: If constraints_path does not exist.
-            KeyError: If the condition_markers section is missing.
+        异常:
+            FileNotFoundError: 配置文件不存在。
+            KeyError: 缺少 ``condition_markers`` 或必需子键。
         """
         self._markers: dict = {}
         self._marker_list: list = []
@@ -73,9 +73,9 @@ class ConditionExtractor:
 
     @property
     def marker_list(self) -> list:
-        """Return the flat list of all known condition marker strings.
+        """返回全部已知条件标记词的扁平列表。
 
-        This list is passed to find_advcl_with_mark() in ud_features.py
-        to identify which advcl children are condition clauses.
+        返回:
+            字符串列表，供 ``find_advcl_with_mark()`` 识别 advcl 条件从句。
         """
         return list(self._marker_list)

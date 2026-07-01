@@ -1,21 +1,12 @@
 """
-Reflexion Feedback Generator for Correcting LLM Extraction Errors
-==================================================================
-Orchestrates the Reflexion self-correction loop: when the UD constraint
-validator returns REFLEXION_REQUIRED status, this module generates a
-targeted feedback prompt with linguistic hints, calls the LLM for
-re-generation, and returns the corrected triplet.
+用于纠正 LLM 抽取错误的 Reflexion 反馈生成器
+==============================================
+编排 Reflexion 自纠错循环：当 UD 约束校验器返回
+REFLEXION_REQUIRED 时，本模块生成带语言学提示的
+定向反馈提示词，调用 LLM 重新生成，并返回纠正后的三元组。
 
-All prompt templates and error hints are loaded from configs/prompts.yaml.
-No hardcoded fallbacks — a missing or incomplete config is an error.
-
-Usage:
-    from src.extraction.client import LLMClient
-    from src.correction.reflexion import ReflexionGenerator
-
-    client = LLMClient(config)
-    reflexion = ReflexionGenerator(client)
-    corrected = reflexion.correct(clause_text, validation_result)
+全部提示模板与错误提示从 configs/prompts.yaml 加载。
+距离阈值从 configs/constraints.yaml 加载。
 """
 
 from __future__ import annotations
@@ -23,15 +14,11 @@ from __future__ import annotations
 import json
 from typing import Optional, TYPE_CHECKING
 
-import yaml
-
-from src.extraction.schema import (
-    LegalTriplet,
-    ValidationResult,
-)
-from src.correction.prompt_loader import load_reflexion_prompt, load_system_prompt
-from src.correction.error_analyzer import determine_error_types
+from src.extraction.schema import LegalTriplet, ValidationResult
+from src.correction.reflexion_error_mapper import determine_error_types
 from src.correction.response_parser import parse_llm_response
+from src.utils.constraints import get_validation_thresholds, load_constraints_config
+from src.utils.prompt_loader import load_reflexion_config
 from src.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -40,123 +27,93 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _load_error_hints(prompts_path: str) -> dict[str, str]:
-    """Load error hints from the prompts YAML config.
-
-    Reads ``reflexion.error_hints`` from the configuration file.
-
-    Args:
-        prompts_path: Path to the prompts YAML file.
-
-    Returns:
-        Dict mapping error type keys to hint strings.
-
-    Raises:
-        FileNotFoundError: If the config file does not exist.
-        KeyError: If the error_hints section is missing or incomplete.
-    """
-    with open(prompts_path, "r", encoding="utf-8") as fh:
-        config = yaml.safe_load(fh)
-
-    reflexion_section = config.get("reflexion", {})
-    hints = reflexion_section.get("error_hints", {})
-
-    if not hints:
-        raise KeyError(
-            f"No 'reflexion.error_hints' in '{prompts_path}'. "
-            "The prompts YAML must define error hints for all categories."
-        )
-
-    if "default" not in hints:
-        raise KeyError(
-            f"'default' error hint missing from '{prompts_path}'. "
-            "A fallback hint with key 'default' is required."
-        )
-
-    return hints
-
-
 class ReflexionGenerator:
-    """Generate feedback prompts and orchestrate Reflexion re-generation.
+    """Reflexion 自纠错生成器 —— 根据 UD 校验结果生成反馈并重抽取三元组。
 
-    When the constraint validator returns REFLEXION_REQUIRED status,
-    this module:
-    1. Analyzes the validation result to determine error types
-    2. Maps errors to specific hints from the YAML config
-    3. Formats the feedback prompt with all context
-    4. Calls the LLM for re-generation
-    5. Returns the corrected triplet
+    当 ``ConstraintValidator`` 返回 ``REFLEXION_REQUIRED`` 时，本类：
+      1. 将校验错误映射为结构化错误类型；
+      2. 从 ``prompts.yaml`` 组装带语言学证据的反馈提示词；
+      3. 调用实验模型重新生成并解析为 ``LegalTriplet``。
 
-    Iteration limit: max 1 iteration.
+    属性:
+        client: 实验用大语言模型客户端。
+        reflexion_prompt_template: Reflexion 反馈模板（含占位符）。
+        system_prompt: 重抽取阶段的系统提示词。
+        error_hints: 错误类型 → 定向修正指引 的映射。
+        long_distance_token_threshold: 判定长距离依存错误的最小词元距离。
     """
 
     def __init__(
         self,
         client: "LLMClient",
         prompts_path: str = "configs/prompts.yaml",
+        constraints_path: str = "configs/constraints.yaml",
     ) -> None:
-        """Initialize the Reflexion generator with an LLM client.
+        """初始化 Reflexion 生成器并加载提示词与阈值配置。
 
-        Loads the Reflexion prompt template and error hints from the
-        YAML prompts config. No fallback — raises on missing config.
+        参数:
+            client: 已配置的 ``LLMClient``，用于执行纠错重生成。
+            prompts_path: Reflexion 反馈模板与错误提示的 YAML 路径。
+            constraints_path: 校验阈值配置路径，用于读取
+                ``long_distance_tokens`` 等参数。
 
-        Args:
-            client: LLM client for re-generation calls.
-            prompts_path: Path to the prompts YAML configuration file.
-
-        Raises:
-            FileNotFoundError: If prompts_path does not exist.
-            KeyError: If required YAML sections are missing.
+        异常:
+            FileNotFoundError: 提示词或约束配置文件不存在。
+            KeyError: YAML 缺少 Reflexion 必需的键（如 ``error_hints``）。
         """
         self.client = client
-        self.reflexion_prompt_template = load_reflexion_prompt(prompts_path)
-        self.system_prompt = load_system_prompt(prompts_path)
-        self.error_hints = _load_error_hints(prompts_path)
+        self.prompts_path = prompts_path
+        self.constraints_path = constraints_path
+
+        feedback, system_prompt, error_hints = load_reflexion_config(prompts_path)
+        self.reflexion_prompt_template = feedback
+        self.system_prompt = system_prompt
+        self.error_hints = error_hints
+
+        constraints = load_constraints_config(constraints_path)
+        thresholds = get_validation_thresholds(constraints, constraints_path)
+        self.long_distance_token_threshold = int(thresholds["long_distance_tokens"])
 
         logger.info(
-            "ReflexionGenerator initialized (prompts_path=%s, error_hints=%d)",
-            prompts_path, len(self.error_hints),
+            "ReflexionGenerator initialized (prompts=%s, constraints=%s, hints=%d, "
+            "long_distance_tokens=%d)",
+            prompts_path,
+            constraints_path,
+            len(self.error_hints),
+            self.long_distance_token_threshold,
         )
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def generate_feedback(
         self,
         validation_result: ValidationResult,
         clause: str = "",
     ) -> str:
-        """Generate a feedback prompt from a validation result.
+        """根据校验结果生成 Reflexion 反馈提示词。
 
-        Maps validation errors to specific linguistic hints and fills
-        the feedback template with all relevant context.
+        参数:
+            validation_result: UD 约束校验器的完整输出，须含
+                ``original_prediction``、``linguistic_evidence`` 与
+                ``corrections``，用于填充模板占位符。
+            clause: 原始合同条款文本；为空时从 ``validation_result`` 中
+                尽力推导摘要性描述。
 
-        Args:
-            validation_result: Result from ConstraintValidator.validate().
-            clause: The original clause text.
-
-        Returns:
-            Formatted feedback prompt string ready for LLM consumption.
+        返回:
+            已格式化的用户侧反馈提示词字符串，可直接作为
+            ``LLMClient.complete()`` 的 ``user_prompt`` 传入。
         """
-        error_types = determine_error_types(validation_result)
+        error_types = determine_error_types(
+            validation_result,
+            self.long_distance_token_threshold,
+        )
         primary_error = error_types[0] if error_types else "default"
-        logger.debug(
-            "Identified error types: %s -> primary=%s", error_types, primary_error
-        )
-
-        specific_hint = self.error_hints.get(
-            primary_error, self.error_hints["default"]
-        )
+        specific_hint = self.error_hints[primary_error]
 
         clause_text = clause if clause else self._derive_clause_text(validation_result)
-
         prediction_json = json.dumps(
             validation_result.original_prediction.model_dump(mode="json"),
             indent=2,
             ensure_ascii=False,
         )
-
         evidence_json = json.dumps(
             validation_result.linguistic_evidence.model_dump(mode="json"),
             indent=2,
@@ -170,10 +127,10 @@ class ReflexionGenerator:
             linguistic_evidence=evidence_json,
             specific_hint=specific_hint,
         )
-
         logger.debug(
             "Generated feedback prompt (%d chars) for error type=%s",
-            len(feedback), primary_error,
+            len(feedback),
+            primary_error,
         )
         return feedback
 
@@ -182,19 +139,19 @@ class ReflexionGenerator:
         clause: str,
         validation_result: ValidationResult,
     ) -> Optional[LegalTriplet]:
-        """Run one iteration of Reflexion correction.
+        """执行一轮 Reflexion 纠错（生成反馈 → 调用 LLM → 解析响应）。
 
-        Generates a feedback prompt from the validation result, sends it
-        to the LLM for re-extraction, and parses the response into a
-        corrected LegalTriplet.
+        参数:
+            clause: 原始合同条款文本，写入反馈模板供模型对照。
+            validation_result: 触发 Reflexion 的校验结果，通常
+                ``status == REFLEXION_REQUIRED``。
 
-        Args:
-            clause: Original clause text that was extracted.
-            validation_result: Validation result indicating what went wrong.
+        返回:
+            解析成功的纠正后 ``LegalTriplet``；若 LLM 响应无法解析为
+            合法三元组则返回 ``None``（调用方应保留原预测或回退策略）。
 
-        Returns:
-            Corrected LegalTriplet if the LLM produced valid output,
-            or None if parsing failed.
+        异常:
+            RuntimeError: LLM 请求在重试耗尽后仍失败（由 ``LLMClient`` 抛出）。
         """
         feedback_prompt = self.generate_feedback(validation_result, clause)
 
@@ -204,10 +161,7 @@ class ReflexionGenerator:
             user_prompt=feedback_prompt,
         )
 
-        logger.debug("LLM Reflexion response length: %d chars", len(response))
-
         corrected_triplet = parse_llm_response(response)
-
         if corrected_triplet is not None:
             logger.info(
                 "Reflexion correction succeeded: subject=%s, predicate=%s",
@@ -218,16 +172,11 @@ class ReflexionGenerator:
             logger.warning(
                 "Reflexion correction failed: could not parse LLM response into LegalTriplet"
             )
-
         return corrected_triplet
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _derive_clause_text(validation_result: ValidationResult) -> str:
-        """Best-effort derivation of clause text from the validation result."""
+        """从校验结果尽力推导条款文本。"""
         pred = validation_result.original_prediction
         if pred.action.predicate:
             subject_text = pred.subject.text or "unknown party"

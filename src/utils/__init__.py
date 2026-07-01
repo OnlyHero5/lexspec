@@ -1,17 +1,16 @@
 """
-LexSpec Utilities Package
+LexSpec 工具包
 ==========================
 
-Shared utility modules used across the entire LexSpec project.
+LexSpec 全项目共享的工具模块。
 
-Public API:
-  - jsonl_io: JSONL reading/writing and Pydantic model serialization.
-  - json_io:  Plain JSON reading/writing and directory management.
-  - io:       Backward-compatibility shim that re-exports from jsonl_io
-              and json_io (existing code continues to work unchanged).
-  - logging:  Centralized logging configuration with console and file
-              handlers. All modules use get_logger(__name__) for
-              consistent formatting.
+公开 API:
+  - jsonl_io: JSONL 读写与 Pydantic 模型序列化。
+  - json_io:  普通 JSON 读写与目录管理。
+  - io:       向后兼容垫片，从 jsonl_io 与 json_io 重新导出
+              （现有代码无需修改即可继续工作）。
+  - logging:  集中式日志配置，含控制台与文件处理器。所有模块使用
+              get_logger(__name__) 以保持格式一致。
 """
 
 from src.utils.jsonl_io import (
@@ -35,18 +34,18 @@ from src.utils.logging import (
 )
 
 __all__ = [
-    # I/O — JSONL
+    # I/O —— JSONL
     "read_jsonl",
     "read_jsonl_stream",
     "write_jsonl",
     "append_jsonl",
     "load_pydantic_list",
     "save_pydantic_list",
-    # I/O — JSON
+    # I/O —— JSON
     "read_json",
     "write_json",
     "ensure_dir",
-    # Logging
+    # 日志
     "setup_logging",
     "get_logger",
 ]

@@ -1,27 +1,24 @@
 """
-Disagreement Logging for Annotation Quality Tracking
-======================================================
-Records and persists annotation disagreements between the two
-annotation models (Qwen3.6 27B and Gemma4 31B) during the
-gold-standard test set construction pipeline.
+标注质量跟踪用的分歧日志
+==========================
+在金标准测试集构建流水线中，记录两个标注模型
+（Qwen3.6 27B 与 Gemma4 31B）之间的标注分歧。
 
-Each disagreement event is captured as an AnnotationDisagreement
-Pydantic model (defined in src/extraction/schema.py) and serialized
-to JSONL for downstream analysis, reporting, and quality monitoring.
+每个分歧事件记为 AnnotationDisagreement
+Pydantic 模型（定义于 src/extraction/schema.py），并序列化为
+JSONL，供下游分析、报告与质量监控。
 
-The disagreement log serves several purposes:
-  1. **Audit trail**: Every disagreement and its resolution is recorded,
-     enabling full traceability from raw annotations to final gold labels.
-  2. **Quality monitoring**: Disagreement patterns reveal systematic
-     weaknesses in annotation models (e.g., one model consistently
-     misidentifies passive voice subjects).
-  3. **Human review queue**: Unresolved disagreements are the work list
-     for human annotators to adjudicate.
-  4. **Inter-annotator agreement reporting**: The log is the primary data
-     source for computing Cohen's kappa, Krippendorff's alpha, and other
-     agreement metrics (see src/evaluation/).
+分歧日志用途：
+  1. **审计轨迹**：记录每条分歧及其解决方式，
+     实现从原始标注到最终金标标签的完整可追溯性。
+  2. **质量监控**：分歧模式揭示标注模型的系统性弱点
+     （例如某模型持续误识被动语态主语）。
+  3. **人工审查队列**：未解决分歧构成人工标注者裁决的工作清单。
+  4. **标注者间一致性报告**：该日志是计算 Cohen's kappa、
+     Krippendorff's alpha 等指标的主要数据源
+     （见 src/evaluation/）。
 
-Usage:
+用法：
     from src.annotation.disagreement_logger import log_disagreement
     from src.annotation.disagreement_io import save_disagreement_log
 
@@ -63,37 +60,33 @@ def log_disagreement(
     disagreements: List[dict],
     resolution: Optional[str] = None,
 ) -> AnnotationDisagreement:
-    """Create an AnnotationDisagreement record from a disagreement event.
+    """从分歧事件创建 AnnotationDisagreement 记录。
 
-    Captures the full context of an annotation disagreement between the
-    two models: the original clause text, both models' annotations, the
-    specific fields where they disagreed, and any resolution that was
-    applied (human or automatic).
+    捕获两模型标注分歧的完整上下文：原始条款文本、
+    两模型标注、具体不一致字段，以及已应用的
+    解决方式（人工或自动）。
 
-    The returned AnnotationDisagreement is a Pydantic model -- it carries
-    full schema validation and can be serialized directly via
-    model_dump(mode="json") for JSONL persistence.
+    返回的 AnnotationDisagreement 为 Pydantic 模型 — 带完整
+    模式校验，可通过 model_dump(mode="json") 直接序列化
+    以持久化到 JSONL。
 
-    Args:
-        clause_id: Unique clause identifier (e.g., "LEXSPEC-001").
-                   Links the disagreement back to the source document.
-        text: The full clause text that was annotated. Preserved for
-              reference when reviewing disagreements.
-        anno_a: First model's annotation (typically Qwen3.6 27B).
-        anno_b: Second model's annotation (typically Gemma4 31B).
-        disagreements: List of field-level disagreement records from
-                       field_level_consensus(). Each dict should contain
-                       at minimum: field, anno_a_value, anno_b_value.
-                       May also contain: resolved, resolved_by, resolution.
-        resolution: Optional overall resolution note describing how
-                    disagreements were resolved (e.g., "all resolved by
-                    human review", "auto-resolved for condition fields").
+    参数：
+        clause_id: 唯一条款标识（如 "LEXSPEC-001"）。
+                   将分歧关联回源文档。
+        text: 被标注的完整条款文本。审查分歧时保留备查。
+        anno_a: 第一模型标注（通常为 Qwen3.6 27B）。
+        anno_b: 第二模型标注（通常为 Gemma4 31B）。
+        disagreements: 来自 field_level_consensus() 的字段级分歧记录列表。
+                       每项至少含：field、anno_a_value、anno_b_value。
+                       也可含：resolved、resolved_by、resolution。
+        resolution: 可选的整体解决说明（如「全部由人工审查解决」、
+                    「条件字段自动解决」）。
 
-    Returns:
-        A fully validated AnnotationDisagreement Pydantic model instance.
+    返回：
+        经完整校验的 AnnotationDisagreement Pydantic 实例。
     """
-    # Validate inputs minimally -- Pydantic validation will catch schema
-    # issues when constructing the AnnotationDisagreement.
+    # 最小输入校验 — 构造 AnnotationDisagreement 时
+    # Pydantic 会捕获模式问题。
     if not clause_id:
         logger.warning("log_disagreement called with empty clause_id")
     if not text:
@@ -104,8 +97,8 @@ def log_disagreement(
             clause_id,
         )
 
-    # Normalize the disagreement records to ensure all expected keys
-    # are present. Some callers may provide partial records.
+    # 规范化分歧记录，确保包含预期键。
+    # 部分调用方可能只提供部分字段。
     normalized_disagreements: List[dict] = []
     for i, d in enumerate(disagreements):
         if not isinstance(d, dict):
@@ -124,10 +117,10 @@ def log_disagreement(
         }
         normalized_disagreements.append(normalized)
 
-    # Build the final gold triplet for this disagreement record.
+    # 为本分歧记录构建最终金标准三元组。
     final_gold = _build_tentative_gold(anno_a, normalized_disagreements)
 
-    # Construct the Pydantic model.
+    # 构造 Pydantic 模型。
     try:
         record = AnnotationDisagreement(
             clause_id=clause_id,
@@ -146,7 +139,7 @@ def log_disagreement(
             f"Invalid AnnotationDisagreement data for clause '{clause_id}'"
         ) from exc
 
-    # Log the disagreement event at an appropriate level.
+    # 按适当级别记录分歧事件。
     unresolved_count = sum(
         1 for d in normalized_disagreements if not d["resolved"]
     )
@@ -174,24 +167,22 @@ def _build_tentative_gold(
     anno_a: LegalTriplet,
     disagreements: List[dict],
 ) -> LegalTriplet:
-    """Build a tentative gold triplet from anno_a with any resolutions applied.
+    """从 anno_a 构建暂定金标准三元组，并应用已有解决结果。
 
-    Starts with anno_a's values as the default (since Qwen is the primary
-    model). For each resolved disagreement where the resolution matches
-    anno_b's value, overrides the corresponding field with anno_b's value.
+    默认以 anno_a 取值（Qwen 为主模型）。对已解决且
+    解决值与 anno_b 一致的分歧，用 anno_b 覆盖对应字段。
 
-    This produces the best-effort gold triplet given the current state
-    of disagreement resolutions.
+    据此得到当前解决状态下尽力而为的金标准三元组。
 
-    Args:
-        anno_a: The primary model's annotation (used as the base).
-        disagreements: List of normalized disagreement records.
+    参数：
+        anno_a: 主模型标注（作为基底）。
+        disagreements: 规范化后的分歧记录列表。
 
-    Returns:
-        A LegalTriplet representing the best-effort gold given current
-        resolution state. For unresolved fields, anno_a's value is kept.
+    返回：
+        反映当前解决状态的最佳努力金标准 LegalTriplet。
+        未解决字段保留 anno_a 取值。
     """
-    # Start with anno_a's values as the default.
+    # 默认以 anno_a 取值。
     gold_subject_text = anno_a.subject.text
     gold_subject_role = anno_a.subject.role
     gold_action_predicate = anno_a.action.predicate
@@ -201,25 +192,25 @@ def _build_tentative_gold(
 
     for d in disagreements:
         if not d.get("resolved", False):
-            # Unresolved -- keep anno_a's value (already the default).
+            # 未解决 — 保留 anno_a（已是默认）。
             continue
 
         field = d.get("field", "")
         resolution = d.get("resolution_text", d.get("resolution", ""))
 
         if not resolution:
-            # Resolution is set but empty -- skip.
+            # 标记已解决但值为空 — 跳过。
             logger.debug(
                 "Disagreement for '%s' marked resolved but has empty resolution",
                 field,
             )
             continue
 
-        # Apply the resolved value to the appropriate field.
+        # 将解决值写入对应字段。
         if field == "subject.text":
             gold_subject_text = resolution
         elif field == "subject.role":
-            # Parse the role string into a LegalRole enum.
+            # 将角色字符串解析为 LegalRole 枚举。
             try:
                 gold_subject_role = LegalRole(resolution)
             except ValueError:

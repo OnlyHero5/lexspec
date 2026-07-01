@@ -1,30 +1,28 @@
 """
-Linguistic error analysis with two-level classification.
+语言学错误分析 — 两级分类。
 
-Per PDF requirement: "必须从语言学角度分类归因，每个错误案例需附上语言学解释"
-(Must classify from linguistic perspective, each error case with linguistic
-explanation citing specific UD relations).
+按 PDF 要求：「必须从语言学角度分类归因，每个错误案例需附上语言学解释」
+（须从语言学视角分类归因，每个错误案例附语言学解释并引用具体 UD 关系）。
 
-Classification system:
+分类体系：
 
-  Primary (linguistic phenomenon) — which syntactic construction caused the error:
-    - Passive Voice Error:         nsubj:pass instead of nsubj; patient confused with agent
-    - Conditional Boundary Error:  advcl/mark scope misidentified
-    - Relative Clause Confusion:   acl:relcl embedding confused the extractor
-    - Long-distance Dependency:    Dependency path > 3 edges between predicate and argument
-    - Negation/Exception Error:    Negation particle or "except/unless" altered the role
-    - Other Error:                 Catch-all
+  主类（语言学现象）— 何种句法结构导致错误：
+    - 被动语态错误：         使用 nsubj:pass 而非 nsubj；受事与施事混淆
+    - 条件边界错误：         advcl/mark 范围识别错误
+    - 关系从句混淆：         acl:relcl 嵌套使抽取器混淆
+    - 长距离依存：           谓词与论元间依存路径 > 3 条边
+    - 否定/例外错误：        否定词或 except/unless 改变角色
+    - 其他错误：             兜底类
 
-  Secondary (field error type) — which field(s) were affected:
-    - Subject Error:               subject.text or subject.role incorrect
-    - Role Error:                  subject.role incorrect (text may be correct)
-    - Predicate Error:             action.predicate incorrect
-    - Object Error:                action.object incorrect
-    - Condition Omission:          condition missing when one should exist
-    - Condition Over-extension:    condition text extends beyond correct boundary
+  次类（字段错误类型）— 哪些字段受影响：
+    - 主语错误：             subject.text 或 subject.role 错误
+    - 角色错误：             subject.role 错误（文本可能正确）
+    - 谓词错误：             action.predicate 错误
+    - 宾语错误：             action.object 错误
+    - 条件遗漏：             应有条件而缺失
+    - 条件过度扩展：         条件文本超出正确边界
 
-Error cases are serializable to JSONL for reporting and can be cross-tabulated
-to produce error distribution statistics.
+错误案例可序列化为 JSONL 供报告使用，并可交叉制表得到错误分布统计。
 """
 
 from __future__ import annotations
@@ -41,13 +39,12 @@ from src.evaluation.error_classification import determine_primary_category
 from src.evaluation.error_summary import generate_error_id
 from src.evaluation.error_explanations import generate_explanation
 from src.utils.io import append_jsonl, ensure_dir, write_json
+from src.utils.constraints import get_validation_thresholds, load_constraints_config
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
 # =============================================================================
-# Single Error Case Generation
+# 单条错误案例生成
 # =============================================================================
 
 
@@ -57,99 +54,102 @@ def generate_error_report(
     tree: Optional[DependencyTree] = None,
     validation_result: Optional[ValidationResult] = None,
     error_id: Optional[str] = None,
+    constraints_path: str = "configs/constraints.yaml",
 ) -> Optional[ErrorCase]:
-    """Generate a detailed error analysis case with linguistic explanation.
+    """生成含语言学解释的详细错误分析案例。
 
-    This is the core analysis function. For a single (prediction, gold) pair,
-    it:
-      1. Compares each field to determine the secondary (field-level) category.
-      2. Analyzes the UD tree (if available) to determine the primary
-         (linguistic phenomenon) category.
-      3. Generates a bilingual (Chinese + English) linguistic explanation
-         citing specific UD relations.
+    核心分析函数。对单个 (prediction, gold) 对：
+      1. 逐字段比较以确定次级（字段级）类别。
+      2. 分析 UD 树（若可用）以确定主类（语言学现象）类别。
+      3. 生成中英双语语言学解释，引用具体 UD 关系。
 
-    Only generates a report if there are actual errors (any field mismatch).
-    If the prediction perfectly matches the gold, returns None.
+    仅当存在实际错误（任字段不匹配）时生成报告。
+    预测与金标完全一致时返回 None。
 
-    Classification logic for primary category:
+    主类分类逻辑：
 
-    Rule 1 — Passive Voice Error:
-        - Tree has nsubj:pass + aux:pass (passive detected)
-        - AND predicted subject.text has high overlap with nsubj:pass text
-          (the patient) while gold subject matches obl:agent (the true agent)
-        -> The LLM confused syntactic subject (patient) with legal subject (agent).
+    规则 1 — 被动语态错误：
+        - 树含 nsubj:pass + aux:pass（检测到被动）
+        - 且预测 subject.text 与 nsubj:pass 文本高重叠
+          （受事），而金标主语匹配 obl:agent（真施事）
+        -> LLM 将句法主语（受事）与法律主语（施事）混淆。
 
-    Rule 2 — Conditional Boundary Error:
-        - advcl relation exists in tree
-        - AND predicted condition tokens have low IoU (< 0.5) with UD condition span
-        -> The LLM misidentified the scope of the condition clause.
+    规则 2 — 条件边界错误：
+        - 树中存在 advcl 关系
+        - 且预测条件词元与 UD 条件片段 IoU 低（< 0.5）
+        -> LLM 误识别条件从句范围。
 
-    Rule 3 — Relative Clause Confusion:
-        - acl:relcl relation exists in tree
-        - AND either the predicate or subject/object text matches tokens
-          inside the relative clause subtree
-        -> The LLM extracted from inside a relative clause instead of the
-           main clause.
+    规则 3 — 关系从句混淆：
+        - 树中存在 acl:relcl 关系
+        - 且谓词或主语/宾语文本匹配关系从句子树内词元
+        -> LLM 从关系从句内而非主句抽取。
 
-    Rule 4 — Long-distance Dependency Error:
-        - Get the dependency distance between the root predicate and its
-          subject/object in the tree
-        - When distance > 3 AND the prediction has errors on the distant argument
-        -> Syntactic distance made extraction difficult.
+    规则 4 — 长距离依存错误：
+        - 计算根谓词与其主语/宾语在树中的依存距离
+        - 当距离 > 3 且预测在远距离论元上有误
+        -> 句法距离使抽取困难。
 
-    Rule 5 — Negation/Exception Error:
-        - neg relation exists in tree
-        - OR condition type is EXCEPTION
-        - AND subject.role is incorrect (should be prohibited_party, got obligor)
-        -> Negation or exception clause confused the legal role assignment.
+    规则 5 — 否定/例外错误：
+        - 树中存在 neg 关系
+        - 或条件类型为 EXCEPTION
+        - 且 subject.role 错误（应为 prohibited_party，得 obligor）
+        -> 否定或例外从句混淆法律角色赋值。
 
-    Rule 6 — Other Error:
-        - No specific linguistic pattern detected; fallback classification.
+    规则 6 — 其他错误：
+        - 未检测到特定语言学模式；兜底分类。
 
-    Args:
-        prediction: System prediction (may be corrected or raw).
-        gold: Gold-standard triplet.
-        tree: UD dependency tree (optional, enables richer linguistic analysis).
-        validation_result: Validation result (optional, provides correction
-                           evidence for richer explanation).
-        error_id: Optional error identifier. If None, auto-generated as "E-{index}".
+    参数:
+        prediction: 系统预测（可能已修正或原始）。
+        gold: 金标准三元组。
+        tree: UD 依存树（可选，支持更丰富的语言学分析）。
+        validation_result: 验证结果（可选，为解释提供修正证据）。
+        error_id: 可选错误 ID；为 None 时自动生成 ``E-{index}``。
+        constraints_path: 约束 YAML 路径，用于读取长距离依存等分析阈值。
 
-    Returns:
-        ErrorCase with full two-level classification and bilingual explanation,
-        or None if no error (prediction matches gold on all fields).
+    返回:
+        含完整两级分类与双语解释的 ErrorCase，
+        或无错误（全部字段匹配）时返回 None。
 
-    Example:
+    示例:
         >>> err = generate_error_report(pred, gold, tree)
         >>> if err:
         ...     print(err.linguistic_explanation)
-        # 被动语态错误 (Passive Voice Error): The system incorrectly ...
+        # 被动语态错误：系统错误地将受事识别为主语……
     """
     # -------------------------------------------------------------------
-    # Step 1: Detect whether any error exists.
+    # 步骤 1：检测是否存在错误。
     # -------------------------------------------------------------------
     field_errors = detect_field_errors(prediction, gold)
     if not field_errors:
-        # Perfect match — no error report needed.
+        # 完全匹配 — 无需错误报告。
         return None
 
     # -------------------------------------------------------------------
-    # Step 2: Determine secondary category (field-level).
+    # 步骤 2：确定次级类别（字段级）。
     # -------------------------------------------------------------------
     secondary = determine_secondary_category(field_errors)
 
     # -------------------------------------------------------------------
-    # Step 3: Determine primary category (linguistic phenomenon).
+    # 步骤 3：确定主类（语言学现象）。
     # -------------------------------------------------------------------
-    primary = ErrorCategory.OTHER_ERROR  # Default fallback
-    ud_evidence: Dict[str, Any] = {}     # Collect UD evidence for explanation.
+    primary = ErrorCategory.OTHER_ERROR  # 默认兜底
+    ud_evidence: Dict[str, Any] = {}     # 收集 UD 证据供解释使用。
 
     if tree is not None and tree.token_count > 0:
+        thresholds = get_validation_thresholds(
+            load_constraints_config(constraints_path), constraints_path
+        )
+        long_distance_threshold = int(thresholds["long_distance_tokens"])
         primary, ud_evidence = determine_primary_category(
-            prediction, gold, tree, field_errors,
+            prediction,
+            gold,
+            tree,
+            field_errors,
+            long_distance_token_threshold=long_distance_threshold,
         )
 
     # -------------------------------------------------------------------
-    # Step 4: Generate bilingual linguistic explanation.
+    # 步骤 4：生成双语语言学解释。
     # -------------------------------------------------------------------
     explanation = generate_explanation(
         prediction, gold, tree, primary, secondary, field_errors, ud_evidence,
@@ -157,7 +157,7 @@ def generate_error_report(
     )
 
     # -------------------------------------------------------------------
-    # Step 5: Assemble the ErrorCase.
+    # 步骤 5：组装 ErrorCase。
     # -------------------------------------------------------------------
     error_case = ErrorCase(
         error_id=error_id or generate_error_id(),
@@ -173,7 +173,7 @@ def generate_error_report(
 
 
 # =============================================================================
-# Batch Error Classification
+# 批量错误分类
 # =============================================================================
 
 
@@ -182,28 +182,27 @@ def classify_errors(
     gold: List[LegalTriplet],
     trees: Optional[List[DependencyTree]] = None,
     validation_results: Optional[List[ValidationResult]] = None,
+    constraints_path: str = "configs/constraints.yaml",
 ) -> List[ErrorCase]:
-    """Classify all errors across the full prediction set.
+    """对完整预测集分类全部错误。
 
-    Processes each (prediction, gold) pair, generates an ErrorCase
-    for pairs with errors, and returns the full list. This is the
-    primary batch entry point for error analysis.
+    处理每个 (prediction, gold) 对，对有错误的对生成 ErrorCase，
+    并返回完整列表。为错误分析的主批量入口。
 
-    Args:
-        predictions: List of predicted LegalTriplets.
-        gold: List of gold-standard LegalTriplets (same length).
-        trees: Optional list of DependencyTree objects (same length).
-               When provided, enables richer primary category classification.
-        validation_results: Optional list of ValidationResult objects (same length).
-                            When provided, enriches explanations with correction
-                            evidence.
+    参数:
+        predictions: 预测 LegalTriplet 列表。
+        gold: 金标准 LegalTriplet 列表（等长）。
+        trees: 可选 DependencyTree 列表（等长）。
+               提供时可做更丰富的主类分类。
+        validation_results: 可选 ValidationResult 列表（等长）。
+            提供时可丰富解释中的修正证据。
+        constraints_path: 约束 YAML 路径，用于主类分类中的距离阈值。
 
-    Returns:
-        List of ErrorCase objects for all samples with errors. Empty list
-        if all predictions match gold perfectly.
+    返回:
+        全部有误样本的 ErrorCase 列表。全部匹配时为空列表。
 
-    Raises:
-        ValueError: If input lists have inconsistent lengths.
+    异常:
+        ValueError: 输入列表长度不一致。
     """
     n = len(predictions)
     if len(gold) != n:
@@ -236,6 +235,7 @@ def classify_errors(
             tree=t,
             validation_result=vr,
             error_id=f"E-{i + 1:04d}",
+            constraints_path=constraints_path,
         )
 
         if error_case is not None:
@@ -250,7 +250,7 @@ def classify_errors(
 
 
 # =============================================================================
-# Error Case Persistence
+# 错误案例持久化
 # =============================================================================
 
 
@@ -258,25 +258,29 @@ def save_error_cases(
     error_cases: List[ErrorCase],
     output_dir: str = "outputs/error_cases",
 ) -> None:
-    """Save error cases to categorized JSONL files.
+    """将错误案例保存为分类 JSONL 文件。
 
-    Creates separate JSONL files per primary error category, plus an
-    aggregate file with all errors. This structure facilitates targeted
-    analysis of specific error types.
+    按主错误类别分别写入 JSONL，并写入汇总文件。
+    便于针对特定错误类型的分析。
 
-    Output files:
+    输出文件:
       - passive_voice_errors.jsonl
       - conditional_boundary_errors.jsonl
       - relative_clause_errors.jsonl
       - long_distance_dependency_errors.jsonl
       - negation_exception_errors.jsonl
       - other_errors.jsonl
-      - all_errors.jsonl (complete set)
+      - all_errors.jsonl（完整集合）
 
-    Args:
-        error_cases: List of ErrorCase objects to save.
-        output_dir: Directory path for output files. Created if it does not
-                    exist. Defaults to "outputs/error_cases".
+    参数:
+        error_cases: 待保存的 ``ErrorCase`` 列表。
+        output_dir: 输出目录路径；不存在则自动创建。
+
+    返回:
+        无（``None``）。按主错误类别写入多个 JSONL 文件及 ``error_summary.json``。
+
+    异常:
+        OSError: 目录创建或文件写入失败时由底层 I/O 抛出。
     """
     if not error_cases:
         logger.info("No error cases to save.")
@@ -284,7 +288,7 @@ def save_error_cases(
 
     ensure_dir(output_dir)
 
-    # Map primary category values to output filenames.
+    # 主类别值 -> 输出文件名。
     category_files: Dict[str, str] = {
         "passive_voice": "passive_voice_errors.jsonl",
         "conditional_boundary": "conditional_boundary_errors.jsonl",
@@ -294,30 +298,30 @@ def save_error_cases(
         "other": "other_errors.jsonl",
     }
 
-    # Track counts per category for logging.
+    # 各类别计数供日志。
     counts: Dict[str, int] = {cat: 0 for cat in category_files}
 
     for case in error_cases:
-        # Serialize to dict using Pydantic's model_dump for JSON compatibility.
+        # 用 Pydantic model_dump 序列化为 JSON 兼容 dict。
         record = case.model_dump(mode="json")
 
-        # Append to category-specific file.
+        # 追加到类别专用文件。
         category = case.primary_category.value
         filename = category_files.get(category, "other_errors.jsonl")
         filepath = os.path.join(output_dir, filename)
         append_jsonl(filepath, record)
         counts[category] = counts.get(category, 0) + 1
 
-        # Append to aggregate file.
+        # 追加到汇总文件。
         all_filepath = os.path.join(output_dir, "all_errors.jsonl")
         append_jsonl(all_filepath, record)
 
-    # Log summary of files written.
+    # 记录已写文件摘要。
     for cat, count in counts.items():
         if count > 0:
             logger.info("Saved %d errors to %s/%s", count, output_dir, category_files[cat])
 
-    # Write a summary index file with counts.
+    # 写入含计数的摘要索引文件。
     summary_path = os.path.join(output_dir, "error_summary.json")
     write_json(summary_path, {
         "total_errors": len(error_cases),

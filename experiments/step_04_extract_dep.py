@@ -83,7 +83,7 @@ def 运行Dep流水线(
 ) -> tuple[List[Dict], List[ValidationResult]]:
     """运行完整 Ours-Dep 流水线: 大语言模型抽取 + UD 校验。
 
-    Returns:
+    返回:
         (最终结果字典列表, ValidationResult 列表) 元组。
     """
     config = 加载模型配置(config_path)

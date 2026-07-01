@@ -1,7 +1,7 @@
 """
-Validation Step 7: Status Determination.
+校验步骤 7：状态判定。
 
-Decides whether the triplet is VALID, CORRECTED, or REFLEXION_REQUIRED.
+判定三元组为 VALID、CORRECTED 或 REFLEXION_REQUIRED。
 """
 
 from __future__ import annotations
@@ -17,87 +17,82 @@ logger = get_logger(__name__)
 def step7_determine_status(
     corrections: List[FieldCorrection],
 ) -> ValidationStatus:
-    """Step 7: Determine the output status.
+    """步骤 7：确定输出状态。
 
-    Decision logic:
+    决策逻辑：
 
-    1. No corrections -> VALID.
-       The LLM output is syntactically consistent with the UD parse.
-       No changes needed. This is the ideal outcome.
+    1. 无修正 -> VALID。
+       大语言模型输出与 UD 解析句法一致。
+       无需更改。此为理想结果。
 
-    2. Has corrections AND UD has candidates for all corrected fields ->
-       CORRECTED.
-       We can fix the LLM output automatically using the UD evidence.
-       The corrected_prediction in ValidationResult contains the
-       auto-fixed triplet.
+    2. 有修正且 UD 对全部修正字段有候选 -> CORRECTED。
+       可用 UD 证据自动修正大语言模型输出。
+       ValidationResult 中的 corrected_prediction 含
+       自动修正后的三元组。
 
-       Conditions for CORRECTED:
-         - All subject corrections have a non-None ud_subject.
-         - All object corrections have a non-None ud_object.
-         (Condition corrections always have UD evidence by construction,
-          since we only add them when ud_spans is non-empty.)
+       CORRECTED 条件：
+         - 全部主语修正均有非 None 的 ud_subject。
+         - 全部宾语修正均有非 None 的 ud_object。
+         （条件修正按构造总有 UD 证据，
+          因仅在 ud_spans 非空时添加。）
 
-    3. Has corrections AND UD is missing evidence for some corrected
-       fields -> REFLEXION_REQUIRED.
-       The LLM needs to re-analyze with linguistic hints because we
-       cannot confidently auto-correct.
+    3. 有修正但 UD 对部分修正字段缺证据 -> REFLEXION_REQUIRED。
+       大语言模型需凭语言学提示重新分析，
+       因无法置信地自动修正。
 
-       Triggers for REFLEXION_REQUIRED:
-         - Agentless passive: UD has patient but no agent.
-           The LLM may have correctly inferred the agent from context,
-           but we cannot verify it syntactically.
-         - Missing UD subject: nsubj is None and obl:agent is None.
-         - Missing UD object: obj is None and nsubj:pass is None.
-           (Intransitive verb or parse error.)
+       REFLEXION_REQUIRED 触发条件：
+         - 无施事被动：UD 有受事无施事。
+           大语言模型可能从上下文正确推断施事，
+           但句法上无法验证。
+         - 缺失 UD 主语：nsubj 与 obl:agent 均为 None。
+         - 缺失 UD 宾语：obj 与 nsubj:pass 均为 None。
+           （不及物动词或解析错误。）
 
-    Args:
-        corrections: List of identified corrections.
+    参数：
+        corrections: 已识别的修正列表。
 
-    Returns:
-        ValidationStatus enum value.
+    返回：
+        ValidationStatus 枚举值。
     """
     if not corrections:
         return ValidationStatus.VALID
 
-    # Check if any correction targets a field where UD lacks evidence.
-    # We can only auto-correct if UD has a candidate for every
-    # corrected field.
+    # 检查是否有修正针对 UD 缺证据的字段。
+    # 仅当 UD 对每个修正字段都有候选时才能自动修正。
     needs_reflexion = False
 
     for correction in corrections:
         field = correction.field
 
         if field == "subject.text" and correction.corrected == "":
-            # UD has no subject to offer as a correction.
+            # UD 无主语可作为修正。
             needs_reflexion = True
             logger.debug(
                 "Reflexion needed: subject correction but UD has no subject"
             )
 
         if field == "action.object" and correction.corrected == "":
-            # UD has no object to offer as a correction.
+            # UD 无宾语可作为修正。
             needs_reflexion = True
             logger.debug(
                 "Reflexion needed: object correction but UD has no object"
             )
 
         if field == "condition.text" and correction.corrected == "":
-            # UD found no condition — but the LLM may have extracted
-            # a valid condition that Stanza missed.
+            # UD 未找到条件 —— 但大语言模型可能抽取了
+            # Stanza 遗漏的有效条件。
             needs_reflexion = True
             logger.debug(
                 "Reflexion needed: condition removal but possible parse gap"
             )
 
-    # Additional check: if either ud_subject or ud_object is None
-    # and a correction targets the corresponding field, we need Reflexion.
-    # (The correction.corrected check above catches explicit empty
-    # corrections, but we also want to catch cases where the correction
-    # text is non-empty but the UD token itself is missing — this
-    # shouldn't happen in normal operation but is a safety check.)
-    # Actually, this is already covered: if ud_subject is None and we
-    # have a subject correction, the correction would have corrected=""
-    # because there's no UD token to use. So the check above covers it.
+    # 附加检查：若 ud_subject 或 ud_object 为 None
+    # 且有修正针对对应字段，需要 Reflexion。
+    # （上文 correction.corrected 检查已捕获显式空修正，
+    #  此处也捕获修正文本非空但 UD 词元本身缺失的情况 ——
+    #  正常运行不应发生，属安全检查。）
+    # 实际上已覆盖：若 ud_subject 为 None 且有主语修正，
+    # correction 的 corrected=""，因无 UD 词元可用。
 
     if needs_reflexion:
         logger.info("Status: REFLEXION_REQUIRED (%d corrections with gaps)", len(corrections))

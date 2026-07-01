@@ -1,5 +1,5 @@
 """
-Negation detection: _is_negated and _has_lexical_negation.
+否定检测：_is_negated 与 _has_lexical_negation。
 """
 
 from __future__ import annotations
@@ -12,34 +12,34 @@ logger = get_logger(__name__)
 
 
 def _is_negated(self, tree: DependencyTree, predicate_idx: int) -> bool:
-    """Check if the predicate is negated.
+    """检查谓词是否被否定。
 
-    Negation detection looks for three patterns (in priority order):
+    否定检测按优先级查找三种模式：
 
-    1. Direct neg dependent: neg(predicate, not)
+    1. 直接 neg 依存：neg(predicate, not)
        "shall NOT assign" -> neg(assign, not)
-       The most common negation pattern in legal English.
+       法律英语中最常见的否定模式。
 
-    2. Negation in aux dependents:
-       Some parses attach "not" to the auxiliary rather than the
-       main verb: "shall NOT" where NOT depends on "shall" via
-       the neg relation. We check the aux token's children.
+    2. aux 依存上的否定：
+       部分解析将 "not" 附在助动词而非主动词：
+       "shall NOT" 中 NOT 通过 neg 关系依附 "shall"。
+       检查 aux 词元的子节点。
 
-    3. Lexical negation tokens near the predicate:
-       - "no" as a determiner modifying the subject:
-         "NO party shall assign..." — the negation is on "party",
-         not directly on the verb, but it creates prohibition.
-       - "neither ... nor" constructions
-       - "never" as an adverb
+    3. 谓词附近的词项否定词元：
+       - "no" 作限定词修饰主语：
+         "NO party shall assign..." —— 否定在 "party" 上，
+         非直接依附动词，但构成禁止。
+       - "neither ... nor" 结构
+       - "never" 作副词
 
-    Args:
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the predicate.
+    参数：
+        tree: 依存树。
+        predicate_idx: 谓词的 1 基索引。
 
-    Returns:
-        True if negation is detected.
+    返回：
+        检测到否定时返回 True。
     """
-    # Pattern 1: Direct neg dependent on the predicate.
+    # 模式 1：谓词上的直接 neg 依存。
     neg_token = find_negation(tree, predicate_idx)
     if neg_token is not None:
         logger.debug(
@@ -50,8 +50,8 @@ def _is_negated(self, tree: DependencyTree, predicate_idx: int) -> bool:
         )
         return True
 
-    # Pattern 2: Check if any auxiliary has a neg dependent.
-    # In some parse styles, "not" attaches to the auxiliary:
+    # 模式 2：检查是否有助动词带有 neg 依存。
+    # 部分解析风格中 "not" 附在助动词：
     # aux(deliver, shall) + neg(shall, not)
     for child in tree.get_children(predicate_idx):
         if child.deprel in ("aux", "aux:pass"):
@@ -63,8 +63,8 @@ def _is_negated(self, tree: DependencyTree, predicate_idx: int) -> bool:
                 )
                 return True
 
-    # Pattern 3: Lexical negation in the vicinity of the predicate.
-    # Check tokens near the predicate for negation words.
+    # 模式 3：谓词附近的词项否定。
+    # 检查谓词附近词元中的否定词。
     if _has_lexical_negation(self, tree, predicate_idx):
         logger.debug(
             "Lexical negation detected near predicate index %d",
@@ -81,25 +81,24 @@ def _has_lexical_negation(
     predicate_idx: int,
     window: int = 5,
 ) -> bool:
-    """Check for lexical negation tokens near the predicate.
+    """检查谓词附近是否存在词项否定词元。
 
-    Scans tokens within `window` positions of the predicate for:
-      - "no" (determiner — "no party shall", "no assignment may")
-      - "neither" (correlative — "neither party shall")
-      - "nor" (correlative — "...nor shall any party")
-      - "never" (adverb — "shall never assign")
+    扫描谓词两侧 ``window`` 个位置内的词元：
+      - "no"（限定词 —— "no party shall"、"no assignment may"）
+      - "neither"（关联 —— "neither party shall"）
+      - "nor"（关联 —— "...nor shall any party"）
+      - "never"（副词 —— "shall never assign"）
 
-    These negation words carry the same legal effect as "not"
-    but may not be attached via the neg dependency relation
-    in all parse styles.
+    这些否定词与 "not" 具有相同法律效果，
+    但在部分解析风格中可能不通过 neg 依存关系附着。
 
-    Args:
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the predicate.
-        window: Number of tokens to scan on each side.
+    参数：
+        tree: 依存树。
+        predicate_idx: 谓词的 1 基索引。
+        window: 两侧扫描的词元数。
 
-    Returns:
-        True if a lexical negation token is found within the window.
+    返回：
+        窗口内发现词项否定词元时返回 True。
     """
     negation_words = {"no", "neither", "nor", "never", "nothing"}
 
@@ -111,12 +110,10 @@ def _has_lexical_negation(
         if token is not None:
             text_lower = token.text.lower().strip()
             if text_lower in negation_words:
-                # "no" as a determiner only counts as negation
-                # if it precedes the subject (scope over NP).
-                # "no" as part of "whether or no" does not count.
+                # "no" 仅在前置于主语（名词短语范围）时计为否定。
+                # "whether or no" 中的 "no" 不计。
                 if text_lower == "no" and token.upos != "DET":
-                    # "no" that is not a determiner is unlikely
-                    # to be negation on the predicate.
+                    # 非限定词的 "no" 不太可能是否定谓词。
                     continue
                 return True
 

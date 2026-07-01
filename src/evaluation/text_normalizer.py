@@ -1,23 +1,20 @@
 """
-Core text normalization pipeline for fair comparison between predictions and gold labels.
+预测与金标公平比较用的核心文本归一化流水线。
 
-Normalization ensures that surface differences (capitalization, articles,
-punctuation) don't penalize semantically correct extractions.
+归一化消除表面差异（大小写、冠词、标点），
+避免语义正确抽取因形式差异被扣分。
 
-This module is used throughout the evaluation pipeline:
-  - Before computing field-level F1 scores (to match "the Seller" with "Seller")
-  - Before tokenizing for token-level overlap metrics
-  - Before comparing extracted text with gold-standard annotations
+本模块用于评估流水线各处：
+  - 计算字段级 F1 前（匹配 "the Seller" 与 "Seller"）
+  - 词元级重叠指标分词前
+  - 抽取文本与金标标注比较前
 
-Design decisions:
-  - All normalization steps are configurable via boolean flags.
-  - Lemmatization is deferred to a separate call (requiring Stanza) and is
-    disabled by default for speed. The schema's predicate field is already
-    in lemma form, so lemmatization is primarily useful for subject/object spans.
-  - Number normalization is bidirectional: "30" and "thirty" both normalize
-    to the same canonical form (the digit form).
-  - Party aliases allow normalization of entity references (e.g., "the Company"
-    -> "Seller") based on contract-level party definitions.
+设计决策:
+  - 各归一化步骤可通过布尔标志配置。
+  - 词形还原单独调用（需 Stanza），默认关闭以保速度。
+    schema 中 predicate 已是词形基形式，词形还原主要用于主语/宾语片段。
+  - 数字归一化双向："30" 与 "thirty" 均映射为同一规范形式（数字形式）。
+  - 当事方别名按合同级当事方定义归一化实体指称（如 "the Company" -> "Seller"）。
 """
 
 from __future__ import annotations
@@ -30,15 +27,14 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 # =============================================================================
-# Number word <-> digit bidirectional mapping
+# 数字词 ↔ 数字双向映射
 # =============================================================================
-# These mappings allow normalization of both "thirty → 30" and "30 → thirty".
-# The canonical form after normalization is the digit form (e.g., "5" not "five").
-# This ensures: "five days" and "5 days" both normalize to "5 days".
+# 支持 "thirty → 30" 与 "30 → thirty" 归一化。
+# 归一化后规范形式为数字（如 "5" 而非 "five"）。
+# 故："five days" 与 "5 days" 均归一化为 "5 days"。
 #
-# Coverage: 0–100 covers essentially all numbers appearing in contract clauses
-# (time periods, payment amounts, notice days, etc.). Numbers exceeding 100
-# are extremely rare in the clause-level extraction task and are left as-is.
+# 覆盖 0–100 基本涵盖合同子句中出现的数字
+# （期限、金额、通知天数等）。超过 100 在子句级抽取中极罕见，保持原样。
 
 NUMBER_WORDS: Dict[str, str] = {
     "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
@@ -50,32 +46,32 @@ NUMBER_WORDS: Dict[str, str] = {
     "eighty": "80", "ninety": "90", "hundred": "100",
 }
 
-# Reverse mapping: digit → word form, for bidirectional normalization.
-# Generated lazily at module load time from NUMBER_WORDS.
+# 反向映射：数字 → 词形，供双向归一化。
+# 模块加载时由 NUMBER_WORDS 惰性生成。
 _NUMBER_WORDS_REVERSE: Dict[str, str] = {v: k for k, v in NUMBER_WORDS.items()}
 
 # =============================================================================
-# Regex patterns — compiled once at module load for performance
+# 正则模式 — 模块加载时编译一次以提升性能
 # =============================================================================
 
-# Articles to strip: standalone "the", "a", "an" at word boundaries.
-# Pattern matches articles as whole words (not substrings of other words).
+# 待剥离冠词：词界上的独立 "the"、"a"、"an"。
+# 模式匹配整词（非其他词子串）。
 _ARTICLE_PATTERN = re.compile(
     r'\b(a|an|the)\b\s*',
     re.IGNORECASE,
 )
 
-# Punctuation to remove entirely. Keeps hyphens and apostrophes since they
-# are meaningful in legal text (e.g., "non-compete", "party's").
-# Also keeps underscores for multi-word entity references.
+# 完全移除的标点。保留连字符与撇号，
+# 因法律文本中有语义（如 "non-compete"、"party's"）。
+# 多词实体引用保留下划线。
 _PUNCTUATION_PATTERN = re.compile(
     r'[.,;:!?()"\'\[\]{}<>/\\|`~@#$%^&*+=]'
 )
 
-# Trailing period on a line (often sentence-ending punctuation in extracted spans).
+# 行尾句号（抽取片段常见句末标点）。
 _TRAILING_PERIOD_PATTERN = re.compile(r'\.$')
 
-# Multiple consecutive whitespace characters.
+# 连续空白。
 _WHITESPACE_PATTERN = re.compile(r'\s+')
 
 
@@ -86,41 +82,33 @@ def normalize(
     number_normalize: bool = True,
     party_aliases: Optional[Dict[str, List[str]]] = None,
 ) -> str:
-    """Normalize text for comparison between predictions and gold labels.
+    """归一化文本以便预测与金标比较。
 
-    Steps (applied in order):
-    1. Lowercase — eliminates case variation ("Seller" vs "seller").
-    2. Remove articles — strips leading/trailing "the", "a", "an" as whole
-       words so "the Buyer" matches "Buyer".
-    3. Remove punctuation — strips standard punctuation marks. Hyphens and
-       apostrophes are preserved because they carry semantic meaning in
-       legal text (e.g., "non-compete", "party's obligations").
-    4. Normalize numbers — converts written number words to digit form
-       (e.g., "thirty" → "30") and vice versa if MULTIPLE number words
-       appear in the text, ensuring both forms map to the same canonical
-       representation. This is applied as whole-word replacement.
-    5. Apply party aliases — normalizes entity references (e.g., "the Company"
-       → "Seller") based on contract-level party definitions.
-    6. Strip extra whitespace — collapses multiple spaces and trims leading/
-       trailing whitespace.
+    步骤（按序应用）:
+    1. 小写 — 消除大小写差异（"Seller" vs "seller"）。
+    2. 移除冠词 — 作为整词剥离 leading/trailing 的 "the"、"a"、"an"，
+       使 "the Buyer" 匹配 "Buyer"。
+    3. 移除标点 — 剥离标准标点。保留连字符与撇号，
+       因法律文本中有语义（如 "non-compete"、"party's obligations"）。
+    4. 数字归一化 — 书面数字转数字形式（如 "thirty" → "30"），
+       文本中多个数字词时也双向映射到同一规范表示。整词替换。
+    5. 应用当事方别名 — 按合同级定义归一化实体（如 "the Company" → "Seller"）。
+    6. 压缩空白 — 合并多空格并去除首尾空白。
 
-    Args:
-        text: Raw text to normalize (subject text, predicate, object, condition).
-        remove_articles: If True, strip leading/trailing articles as whole words.
-        lemmatize: Reserved for future use; currently a no-op. Lemmatization
-                   requires Stanza and is too slow for high-throughput evaluation.
-                   The predicate field in LegalTriplet is already in lemma form.
-        number_normalize: If True, normalize number words to digit form and
-                          vice versa for consistent comparison.
-        party_aliases: Optional dict mapping canonical party names to lists of
-                       alias strings. e.g., {"Seller": ["the Seller", "Company"]}.
-                       If provided, any alias found in the text is replaced by
-                       the canonical name.
+    参数:
+        text: 待归一化原始文本（主语、谓词、宾语、条件）。
+        remove_articles: 为 True 时作为整词剥离冠词。
+        lemmatize: 预留；当前无操作。词形还原需 Stanza，高吞吐评估过慢。
+                   LegalTriplet 的 predicate 已是词形基形式。
+        number_normalize: 为 True 时数字词与数字双向归一化以便一致比较。
+        party_aliases: 可选，规范当事方名 -> 别名列表。
+                       如 {"Seller": ["the Seller", "Company"]}。
+                       文本中出现任别名则替换为规范名。
 
-    Returns:
-        Normalized text string suitable for exact-match or token-overlap comparison.
+    返回:
+        适于精确匹配或词元重叠比较的归一化字符串。
 
-    Examples:
+    示例:
         >>> normalize("the Seller shall deliver the Goods.")
         'seller shall deliver goods'
 
@@ -130,46 +118,41 @@ def normalize(
         >>> normalize("the Company", party_aliases={"Seller": ["the Company"]})
         'seller'
     """
-    # Guard against None or empty input
+    # 防御 None 或空输入
     if not text:
         return ""
 
     normalized = text
 
-    # Step 1: Lowercase for case-insensitive matching.
-    # Legal contract text uses mixed case (e.g., "Seller", "Goods") but
-    # capitalization does not change the semantic referent.
+    # 步骤 1：小写，大小写不敏感匹配。
+    # 合同文本大小写混用（如 "Seller"、"Goods"），
+    # 大小写不改变语义指称。
     normalized = normalized.lower()
 
     if remove_articles:
-        # Step 2: Remove articles as whole words.
-        # "the Buyer" → "Buyer", "a notice" → "notice".
-        # Uses regex to match word boundaries, avoiding substring matches
-        # (e.g., "there" should not become "re").
+        # 步骤 2：作为整词移除冠词。
+        # "the Buyer" → "Buyer"，"a notice" → "notice"。
+        # 用正则词界，避免子串误匹配（如 "there" 不应变成 "re"）。
         normalized = _ARTICLE_PATTERN.sub('', normalized)
 
-    # Step 3: Remove punctuation.
-    # First strip trailing period (common at end of extracted spans), then
-    # remove all other punctuation characters.
+    # 步骤 3：移除标点。
+    # 先剥行尾句号（抽取片段常见），再移除其余标点。
     normalized = _TRAILING_PERIOD_PATTERN.sub('', normalized)
     normalized = _PUNCTUATION_PATTERN.sub(' ', normalized)
 
     if number_normalize:
-        # Step 4: Normalize number words ↔ digits.
-        # Strategy: replace each known word-form number with its digit form.
-        # Handle compound numbers like "thirty five" → "35" by first replacing
-        # individual words, then collapsing adjacent digits.
+        # 步骤 4：数字词 ↔ 数字归一化。
+        # 策略：已知词形数字替换为数字形式。
+        # 处理 "thirty five" → "35"：先替换各词，再合并相邻数字。
         normalized = _normalize_numbers(normalized)
 
     if party_aliases:
-        # Step 5: Apply party alias mappings.
-        # For each canonical party name, check each of its aliases against
-        # the text. Longest aliases first to avoid partial replacements.
+        # 步骤 5：应用当事方别名映射。
+        # 对每个规范名，按其别名与文本匹配。最长别名优先，避免部分替换。
         normalized = _apply_party_aliases(normalized, party_aliases)
 
-    # Step 6: Strip extra whitespace.
-    # Collapse multiple spaces (from punctuation removal and other operations
-    # that replace characters with spaces) into single spaces, and trim.
+    # 步骤 6：压缩多余空白。
+    # 标点移除等将字符变空格后，合并为单空格并去除首尾空白。
     normalized = _WHITESPACE_PATTERN.sub(' ', normalized)
     normalized = normalized.strip()
 
@@ -177,52 +160,48 @@ def normalize(
 
 
 def _normalize_numbers(text: str) -> str:
-    """Normalize number words to digit form within a text string.
+    """将文本中的数字词归一化为数字形式。
 
-    Handles both simple numbers ("five" → "5") and compound numbers
-    ("thirty five" → "35") by performing word-by-word replacement and then
-    collapsing adjacent digit tokens.
+    处理简单数字（"five" → "5"）与复合数字（"thirty five" → "35"）：
+    逐词替换后合并相邻数字词元。
 
-    Args:
-        text: Lowercased text possibly containing written number words.
+    参数:
+        text: 可能含书面数字的小写文本。
 
-    Returns:
-        Text with number words replaced by their digit equivalents.
+    返回:
+        数字词已替换为数字等价形式的文本。
     """
     words = text.split()
     result_words: List[str] = []
 
     for word in words:
         stripped = word.strip()
-        # Check if the word (after stripping surrounding non-alpha from
-        # prior punctuation removal) is a known number word.
+        # 检查词（剥离先前标点移除留下的非字母后）
+        # 是否为已知数字词。
         if stripped in NUMBER_WORDS:
             result_words.append(NUMBER_WORDS[stripped])
         else:
             result_words.append(stripped)
 
-    # Collapse adjacent digit tokens: "30 5" → "35"
-    # This handles compound numbers like "thirty five days".
-    # Only collapse when both adjacent tokens are pure digit strings.
+    # 合并相邻数字词元："30 5" → "35"
+    # 处理 "thirty five days" 等复合数。
+    # 仅当相邻两词元均为纯数字串时合并。
     collapsed: List[str] = []
     i = 0
     while i < len(result_words):
         if i + 1 < len(result_words) and result_words[i].isdigit() and result_words[i + 1].isdigit():
-            # Merge two adjacent digit tokens: "30" + "5" = "305"
-            # Note: this is a heuristic — "thirty five" produces "30" "5" → "305"
-            # which is acceptable because we compare sets of tokens, and the
-            # original "thirty five" would also produce a single token set.
-            # For correctness: actually "thirty" + "five" = 30 + 5 represents 35.
-            # We concatenate digits: 30 + 5 → 305 is wrong semantically.
-            # The correct approach: if prev is a multiple of 10 and next is < 10,
-            # add them. Otherwise concatenate.
+            # 合并两相邻数字词元："30" + "5" = "305"
+            # 注：此为启发式 — "thirty five" 得 "30" "5" → "305"
+            # 可接受，因比较用词元集合，原 "thirty five" 也是单集合。
+            # 严格正确："thirty" + "five" = 30 + 5 表示 35。
+            # 若前为 10 的倍数且后 < 10，则相加；否则拼接。
             prev_val = int(result_words[i])
             next_val = int(result_words[i + 1])
             if prev_val % 10 == 0 and next_val < 10 and next_val > 0:
                 # "thirty five" → 30 + 5 = 35
                 collapsed.append(str(prev_val + next_val))
             else:
-                # Other adjacent numbers — space-separate them
+                # 其他相邻数字 — 空格分隔
                 collapsed.append(result_words[i])
                 collapsed.append(result_words[i + 1])
             i += 2
@@ -234,29 +213,29 @@ def _normalize_numbers(text: str) -> str:
 
 
 def _apply_party_aliases(text: str, party_aliases: Dict[str, List[str]]) -> str:
-    """Apply party alias substitutions to a normalized text.
+    """对归一化文本应用当事方别名替换。
 
-    For each canonical party (e.g., "Seller"), replaces any of its aliases
-    (e.g., "the Seller", "Company", "Vendor") with the canonical name.
-    Longer aliases are processed first to prevent partial matches.
+    对每个规范当事方（如 "Seller"），将其任别名
+    （如 "the Seller"、"Company"、"Vendor"）替换为规范名。
+    较长别名先处理，避免部分匹配。
 
-    Args:
-        text: Normalized text (already lowercased, punctuation removed).
-        party_aliases: Dict mapping canonical names to lists of alias strings.
+    参数:
+        text: 已归一化文本（已小写、已去标点）。
+        party_aliases: 规范名 -> 别名列表 的字典。
 
-    Returns:
-        Text with aliases replaced by canonical party names.
+    返回:
+        别名已替换为规范当事方名的文本。
     """
     result = text
     for canonical, aliases in party_aliases.items():
-        # Sort aliases by length descending — longer patterns first to avoid
-        # "the Company" being partially replaced when "Company" is also an alias.
+        # 别名按长度降序 — 较长模式优先，避免 "Company" 单独替换时
+        # 误伤 "the Company"。
         for alias in sorted(aliases, key=len, reverse=True):
-            # Normalize the alias itself for matching (lowercase, strip).
+            # 匹配用别名本身归一化（小写、去除首尾空白）。
             normalized_alias = alias.lower().strip()
-            # Replace as a whole-word or phrase match.
-            # Use a regex with word boundaries for the alias.
-            # Escape the alias for regex safety (parentheses, dots in entity names).
+            # 整词或短语匹配替换。
+            # 别名用带词界的正则。
+            # 转义别名以防正则特殊字符（实体名中的括号、点等）。
             pattern = re.compile(
                 r'\b' + re.escape(normalized_alias) + r'\b',
                 re.IGNORECASE,

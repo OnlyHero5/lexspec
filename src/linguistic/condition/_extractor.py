@@ -1,5 +1,5 @@
 """
-Primary extraction interface for ConditionExtractor.
+ConditionExtractor 的主提取接口。
 """
 
 from __future__ import annotations
@@ -22,30 +22,29 @@ def extract(
     tree: DependencyTree,
     predicate_idx: int,
 ) -> Optional[ConditionSpan]:
-    """Extract the primary condition clause for a predicate.
+    """提取谓词的主条件从句。
 
-    If multiple condition clauses exist, returns the first one
-    (typically the most syntactically prominent — the one closest
-    to the main predicate in surface order).
+    若存在多个条件从句，返回第一个
+    （通常为句法上最突出者 —— 表层顺序上最接近主谓词）。
 
-    For legal contracts, having >1 condition clause per main predicate
-    is uncommon but possible (e.g., "If X and upon Y, Seller shall Z").
-    Use extract_all() to get all conditions.
+    法律合同中，每个主谓词对应多个条件从句不常见但可能
+    （如 "If X and upon Y, Seller shall Z"）。
+    使用 extract_all() 获取全部条件。
 
-    Args:
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the main predicate.
+    参数：
+        tree: 依存树。
+        predicate_idx: 主谓词的 1 基索引。
 
-    Returns:
-        ConditionSpan with text, type, and mark info, or None if
-        no condition clause is detected.
+    返回：
+        含文本、类型与标记信息的 ConditionSpan，或
+        未检测到条件从句时返回 None。
 
-    Raises:
-        ValueError: If predicate_idx is not found in the tree.
+    抛出：
+        ValueError: predicate_idx 在树中未找到时。
     """
     spans = extract_all(self, tree, predicate_idx)
     if spans:
-        # Return the first (most prominent) condition.
+        # 返回第一个（最突出的）条件。
         return spans[0]
     return None
 
@@ -55,22 +54,21 @@ def extract_all(
     tree: DependencyTree,
     predicate_idx: int,
 ) -> List[ConditionSpan]:
-    """Extract all condition clauses (including multiple conditions).
+    """提取全部条件从句（含多个条件）。
 
-    When multiple conditions exist on the same predicate (e.g.,
+    同一谓词上存在多个条件时（如
     "If the Buyer defaults, and unless waived by the Seller, the
-    Seller may terminate"), both conditions are returned.
+    Seller may terminate"），返回全部条件。
 
-    Args:
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the main predicate.
+    参数：
+        tree: 依存树。
+        predicate_idx: 主谓词的 1 基索引。
 
-    Returns:
-        List of all ConditionSpan objects found. Empty list if
-        no conditions are detected.
+    返回：
+        找到的全部 ConditionSpan 对象列表。未检测到条件时为空列表。
 
-    Raises:
-        ValueError: If predicate_idx is not found in the tree.
+    抛出：
+        ValueError: predicate_idx 在树中未找到时。
     """
     predicate = tree.get_token(predicate_idx)
     if predicate is None:
@@ -79,8 +77,8 @@ def extract_all(
             f"(token count: {tree.token_count})"
         )
 
-    # Step 1: Get raw advcl+mark spans from the UD tree.
-    # These spans are UNCLASSIFIED — condition_type is NONE.
+    # 步骤 1：从 UD 树获取原始 advcl+mark 跨度。
+    # 这些跨度未分类 —— condition_type 为 NONE。
     raw_spans = find_advcl_with_mark(
         tree, predicate_idx, self._marker_list
     )
@@ -92,20 +90,20 @@ def extract_all(
         )
         return []
 
-    # Step 2: Classify each span based on its mark word.
+    # 步骤 2：根据标记词分类各跨度。
     classified_spans: List[ConditionSpan] = []
     for span in raw_spans:
         if span.mark_token is None:
-            # Should not happen — find_advcl_with_mark only returns
-            # spans with mark tokens. Defensive check.
+            # 不应发生 —— find_advcl_with_mark 仅返回
+            # 带标记词元的跨度。防御性检查。
             logger.debug("Skipping span without mark token")
             continue
 
         mark_text = span.mark_text.lower().strip()
         condition_type = _classify_condition(self, mark_text)
 
-        # Create a classified ConditionSpan by copying fields from the
-        # raw span and setting the condition_type.
+        # 通过复制原始跨度字段并设置 condition_type，
+        # 创建已分类的 ConditionSpan。
         classified = ConditionSpan(
             tokens=span.tokens,
             text=span.text,
@@ -125,49 +123,48 @@ def extract_all(
 
 
 def _classify_condition(self, mark_text: str) -> ConditionType:
-    """Classify a condition based on its mark word.
+    """根据标记词分类条件。
 
-    Uses the legal-domain taxonomy loaded from constraints.yaml:
+    使用从 constraints.yaml 加载的法律领域分类体系：
 
-    TRIGGER (event-based):
-      "if" — prototypical conditional: "IF Buyer defaults, Seller may..."
-      "provided that" — qualified condition: "provided that the
+    TRIGGER（事件触发）：
+      "if" —— 典型条件："IF Buyer defaults, Seller may..."
+      "provided that" —— 限定条件："provided that the
         Company receives notice..."
-      "in the event that" — contingency: "in the event that any
+      "in the event that" —— 或有事项："in the event that any
         representation proves false..."
-      "so long as" — durative condition: "so long as no Event of
+      "so long as" —— 持续条件："so long as no Event of
         Default has occurred..."
 
-    TEMPORAL (time-based):
-      "when" — temporal trigger: "WHEN the Closing occurs..."
-      "upon" — event-triggered: "UPON delivery of the Goods..."
-      "after" — sequential: "AFTER the Closing Date..."
-      "within" — bounded: "WITHIN 30 days of the date hereof..."
+    TEMPORAL（时间）：
+      "when" —— 时间触发："WHEN the Closing occurs..."
+      "upon" —— 事件触发："UPON delivery of the Goods..."
+      "after" —— 顺序："AFTER the Closing Date..."
+      "within" —— 有界："WITHIN 30 days of the date hereof..."
 
-    EXCEPTION (scope limitation):
-      "unless" — negative condition: "UNLESS otherwise agreed..."
-      "except" — carve-out: "EXCEPT as provided in Section 2.3..."
-      "notwithstanding" — override: "NOTWITHSTANDING anything to
+    EXCEPTION（范围限制）：
+      "unless" —— 否定条件："UNLESS otherwise agreed..."
+      "except" ——  carve-out："EXCEPT as provided in Section 2.3..."
+      "notwithstanding" —— 覆盖："NOTWITHSTANDING anything to
         the contrary..."
 
-    For multi-word markers where Stanza only tagged the first word
-    (e.g., "provided" for "provided that"), we attempt to look up
-    the single word first, then try prefix matching.
+    对 Stanza 仅标注首词的多词标记
+    （如 "provided that" 中的 "provided"），先查单词，
+    再尝试前缀匹配。
 
-    Args:
-        mark_text: The mark word text (lowercase, stripped).
+    参数：
+        mark_text: 标记词文本（小写、去首尾空白）。
 
-    Returns:
-        ConditionType enum value. Defaults to TRIGGER if the mark
-        word is unrecognized (conservative assumption: an unknown
-        advcl+mark is most likely a conditional).
+    返回：
+        ConditionType 枚举值。未识别的标记词默认为 TRIGGER
+        （保守假设：未知 advcl+mark 最可能为条件构造）。
     """
-    # Exact match lookup in the taxonomy.
+    # 在分类体系中精确匹配。
     if mark_text in self._markers:
         return self._markers[mark_text]
 
-    # Multi-word marker: check if mark_text starts any known marker.
-    # E.g., "provided" matches "provided that".
+    # 多词标记：检查 mark_text 是否为某已知标记的前缀。
+    # 例如 "provided" 匹配 "provided that"。
     for marker, ctype in self._markers.items():
         if marker.startswith(mark_text + " "):
             logger.debug(
@@ -176,19 +173,19 @@ def _classify_condition(self, mark_text: str) -> ConditionType:
             )
             return ctype
 
-    # Fallback: also check if marker starts with mark_text
-    # (for cases where the Stanza token includes more than expected).
-    # This handles rare tokenization edge cases.
+    # 回退：也检查标记是否以 mark_text 开头
+    #（Stanza 词元包含超出预期的内容时）。
+    # 处理罕见分词边界情况。
     for marker, ctype in self._markers.items():
         if mark_text.startswith(marker + " ") or mark_text == marker:
             return ctype
 
-    # Unknown mark word — default to TRIGGER.
-    # Rationale: In legal English, most unrecognized advcl+mark
-    # patterns are conditional-like (trigger) constructions.
-    # Temporal markers ("when", "upon") are reliably parsed by Stanza.
-    # If the mark is unrecognized, it is more likely a less common
-    # trigger word than an unrecognized temporal or exception marker.
+    # 未知标记词 —— 默认为 TRIGGER。
+    # 理由：法律英语中，大多数未识别的 advcl+mark
+    # 模式类似条件（触发）构造。
+    # 时间标记（"when"、"upon"）通常能被 Stanza 可靠解析。
+    # 若标记未识别，更可能是较少见的触发词，
+    # 而非未识别的时间或例外标记。
     logger.debug(
         "Unrecognized mark word '%s' — defaulting to TRIGGER", mark_text
     )

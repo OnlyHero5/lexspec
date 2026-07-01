@@ -1,8 +1,8 @@
 """
-Evaluation reporting: summary CSV generation and formatted comparison tables.
+评估报告：摘要 CSV 生成与格式化比较表。
 
-Produces human-readable console output and CSV summaries for the dual-track
-evaluation (task metrics + linguistic metrics + significance testing).
+为双轨评估（任务指标 + 语言学指标 + 显著性检验）
+生成可读控制台输出与 CSV 摘要。
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ logger = get_logger(__name__)
 
 
 def _primary_phenomenon(phenomena: Dict[str, bool]) -> str:
-    """Determine the primary phenomenon label for a clause.
+    """确定子句的主现象标签。
 
-    Returns the most specific phenomenon label for stratified analysis.
-    If multiple phenomena are present, returns the first one found in
-    priority order (passive > conditional > relative > long_dist > negation).
+    返回分层分析用的最具体现象标签。
+    若多种现象并存，按优先级返回首个
+    （passive > conditional > relative > long_dist > negation）。
     """
     order = ["passive", "conditional", "relative_clause",
              "long_distance", "negation"]
@@ -36,20 +36,19 @@ def _write_summary_csv(
     significance: Dict[str, Any],
     output_path: str,
 ) -> None:
-    """Write a summary CSV with key metrics for all experiments.
+    """写入各实验关键指标的摘要 CSV。
 
-    Produces a table with one row per experiment and columns for overall F1,
-    per-field F1, linguistic metrics, and significance indicators.
+    每行一个实验，列含总体 F1、各字段 F1、语言学指标与显著性指示。
 
-    Args:
-        task_metrics:       Dict mapping experiment name -> task metric dicts.
-        linguistic_metrics:  Dict mapping experiment name -> linguistic metric dicts.
-        significance:        Significance test results.
-        output_path:         Path for the output CSV file.
+    参数:
+        task_metrics:       实验名 -> 任务指标字典。
+        linguistic_metrics:  实验名 -> 语言学指标字典。
+        significance:        显著性检验结果。
+        output_path:         输出 CSV 路径。
     """
     rows: List[Dict[str, Any]] = []
 
-    # Determine the set of experiments present.
+    # 确定存在的实验集合。
     exp_names = sorted(
         set(task_metrics.keys())
         | set(linguistic_metrics.keys())
@@ -58,7 +57,7 @@ def _write_summary_csv(
     for name in exp_names:
         row: Dict[str, Any] = {"experiment": name}
 
-        # Task metrics.
+        # 任务指标。
         tm = task_metrics.get(name, {})
         row["overall_f1"] = tm.get("overall_f1", None)
         row["subject_text_f1"] = tm.get("subject_text_f1", None)
@@ -67,7 +66,7 @@ def _write_summary_csv(
         row["object_f1"] = tm.get("object_f1", None)
         row["condition_f1"] = tm.get("condition_f1", None)
 
-        # Linguistic metrics.
+        # 语言学指标。
         lm = linguistic_metrics.get(name, {})
         ling_summary = lm.get("summary", {})
         quality = ling_summary.get("linguistic_quality_indicators", {})
@@ -87,7 +86,7 @@ def _write_summary_csv(
         logger.warning("No data to write to summary CSV.")
         return
 
-    # Write CSV.
+    # 写入 CSV。
     with open(output_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
         writer.writeheader()
@@ -101,12 +100,12 @@ def _print_comparison_table(
     linguistic_metrics: Dict[str, Dict],
     significance: Dict[str, Any],
 ) -> None:
-    """Print a formatted comparison table to stdout."""
+    """向 stdout 打印格式化比较表。"""
     print("\n" + "=" * 72)
     print("LEXSPEC EXPERIMENT COMPARISON TABLE")
     print("=" * 72)
 
-    # ---- Task Metrics ----
+    # ---- 任务指标 ----
     print("\n--- Task Metrics (Weighted Triplet F1) ---")
     header = f"{'Experiment':<18s} {'Overall F1':>10s} {'Subj':>8s} {'Role':>8s} {'Pred':>8s} {'Obj':>8s} {'Cond':>8s}"
     print(header)
@@ -125,7 +124,7 @@ def _print_comparison_table(
             f"{tm.get('condition_f1', 0):>8.4f}"
         )
 
-    # ---- Linguistic Metrics ----
+    # ---- 语言学指标 ----
     print("\n--- Linguistic Metrics ---")
     ling_header = f"{'Experiment':<18s} {'DepLegality':>12s} {'CondIoU':>10s} {'PassiveAcc':>10s} {'FalseAgent':>10s}"
     print(ling_header)
@@ -143,7 +142,7 @@ def _print_comparison_table(
             f"{passive.get('false_agent_rate', 0):>10.4f}"
         )
 
-    # ---- Correction Metrics ----
+    # ---- 修正指标 ----
     print("\n--- Correction Analysis ---")
     corr_header = f"{'Experiment':<18s} {'ValidRate':>10s} {'CorrRate':>10s} {'ReflexRate':>10s} {'SuccessRate':>12s}"
     print(corr_header)
@@ -161,7 +160,7 @@ def _print_comparison_table(
             f"{ca.get('correction_success_rate', 0):>12.4f}"
         )
 
-    # ---- Significance ----
+    # ---- 显著性 ----
     print("\n--- Significance Tests (Bootstrap, 10k resamples) ---")
     sig_comp = significance.get("comparisons", {})
     sig_matrix = significance.get("summary", {}).get("significance_matrix", {})
@@ -179,7 +178,7 @@ def _print_comparison_table(
                 f"{'YES' if bs.get('significant_at_0.05', False) else 'no':>6s}"
             )
 
-    # --- Stratified significance ---
+    # --- 分层显著性 ---
     strat = significance.get("stratified", {})
     if strat:
         print("\n--- Stratified Significance (Baseline vs Ours-Reflexion by Phenomenon) ---")

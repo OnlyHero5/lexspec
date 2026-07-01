@@ -41,31 +41,27 @@ logger = get_logger(__name__)
 
 
 # =============================================================================
-# LegalTripletExtractor
+# 法律三元组抽取器
 # =============================================================================
 
 
 class LegalTripletExtractor:
-    """Extract legal action triplets from contract clauses via LLM.
+    """通过大语言模型从合同条款中抽取法律动作三元组。
 
-    Loads prompt templates from ``configs/prompts.yaml``.  Raises an error
-    hard-coded defaults), formats them with the target clause, sends them
-    to the LLM, and parses the structured JSON response into validated
-    ``LegalTriplet`` Pydantic models.
+    从 ``configs/prompts.yaml`` 加载提示词模板。若配置文件缺失则抛出错误
+    （不使用硬编码默认值），将模板与目标条款格式化后发送给大语言模型，
+    并将结构化 JSON 响应解析为经过校验的 ``LegalTriplet`` Pydantic 模型。
 
-    The extractor is designed to be **robust against LLM failures**: if the
-    model returns malformed JSON, incomplete fields, or refuses to answer,
-    a fallback triplet is constructed so that batch processing continues
-    uninterrupted.  Failed extractions are logged with full context for
-    post-hoc debugging.
+    抽取器设计为**对大语言模型故障具有鲁棒性**：若模型返回格式错误的 JSON、
+    字段不完整或拒绝作答，将构建回退三元组以保证批量处理不中断。
+    失败的抽取会记录完整上下文日志，便于事后调试。
 
-    Attributes:
-        client:             The configured ``LLMClient`` instance.
-        system_prompt:      The system prompt template (loaded or default).
-        user_prompt_template:  The user prompt template with ``{clause}`` or
-                               ``{sentence}`` placeholder.
-        prompts_source:     Human-readable description of where the prompts
-                            were loaded from (for logging).
+    属性:
+        client:             已配置的 ``LLMClient`` 实例。
+        system_prompt:      系统提示词模板（从文件加载）。
+        user_prompt_template:  用户提示词模板，含 ``{clause}`` 或
+                               ``{sentence}`` 占位符。
+        prompts_source:     提示词来源的可读描述（用于日志）。
     """
 
     def __init__(
@@ -73,22 +69,20 @@ class LegalTripletExtractor:
         client: LLMClient,
         prompts_path: str = "configs/prompts.yaml",
     ):
-        """Initialize the extractor with an LLM client and prompt configuration.
+        """使用大语言模型客户端和提示词配置初始化抽取器。
 
-        Loads prompt templates from ``prompts_path`` (YAML).  Raises an
-        error if the configuration file is missing or incomplete — no
-        silent fallback to hardcoded defaults.
+        从 ``prompts_path``（YAML）加载提示词模板。若配置文件缺失或不完整
+        则抛出错误，不会静默回退到硬编码默认值。
 
-        Args:
-            client:        A configured ``LLMClient`` instance pointing at
-                           the llama.cpp server.
-            prompts_path:  Path to the ``prompts.yaml`` configuration file.
-                           Defaults to ``configs/prompts.yaml``.
+        参数:
+            client:        指向 llama.cpp 服务器的已配置 ``LLMClient`` 实例。
+            prompts_path:  ``prompts.yaml`` 配置文件路径。
+                           默认为 ``configs/prompts.yaml``。
 
-        Raises:
-            FileNotFoundError: If prompts_path does not exist.
-            KeyError: If the YAML is missing required keys.
-            yaml.YAMLError: If the YAML is malformed.
+        异常:
+            FileNotFoundError: prompts_path 不存在。
+            KeyError: YAML 缺少必需的键。
+            yaml.YAMLError: YAML 格式错误。
         """
         self.client = client
 
@@ -104,46 +98,37 @@ class LegalTripletExtractor:
         )
 
     # ---------------------------------------------------------------------
-    # Main Extraction Entry Points
+    # 主抽取入口
     # ---------------------------------------------------------------------
 
     def extract(self, clause: str) -> LegalTriplet:
-        """Extract a legal triplet from a single contract clause.
+        """从单条合同条款中抽取法律三元组。
 
-        This is the main entry point.  It performs the following steps:
+        主入口方法，执行以下步骤：
 
-        1. **Format the prompt** — Inserts the clause text into the user
-           prompt template (handles both ``{clause}`` and ``{sentence}``
-           placeholders depending on which template is loaded).
-        2. **Call the LLM** — Sends the formatted prompt via
-           ``LLMClient.complete_structured()``.
-        3. **Parse the response** — Robust JSON parsing with multiple
-           fallback strategies.
-        4. **Validate** — Checks the parsed dict against the
-           ``LegalTriplet`` Pydantic model.
-        5. **Normalize** — Trims whitespace, handles empty conditions,
-           ensures enum values are valid.
+        1. **格式化提示词** —— 将条款文本插入用户提示词模板
+           （根据所加载模板处理 ``{clause}`` 或 ``{sentence}`` 占位符）。
+        2. **调用大语言模型** —— 通过 ``LLMClient.complete_structured()`` 发送。
+        3. **解析响应** —— 采用多种回退策略的鲁棒 JSON 解析。
+        4. **校验** —— 对照 ``LegalTriplet`` Pydantic 模型校验解析后的字典。
+        5. **规范化** —— 修剪空白、处理空条件、确保枚举值有效。
 
-        Args:
-            clause:  A contract clause string, e.g.,
+        参数:
+            clause:  合同条款字符串，例如
                      ``"Seller shall deliver the goods within 30 days."``
 
-        Returns:
-            A validated ``LegalTriplet`` with extracted subject, action,
-            and condition.
+        返回:
+            包含已抽取主体、动作与条件的经过校验的 ``LegalTriplet``。
 
-        Raises:
-            ValueError:  If the LLM response cannot be parsed or validated
-                         after all fallback attempts.  This is rare — the
-                         method is designed to return a fallback triplet in
-                         most failure modes.
+        异常:
+            ValueError:  若在所有回退尝试后仍无法解析或校验大语言模型响应。
+                         此情况较少见——方法在多数失败模式下会返回回退三元组。
         """
-        # --- Step 1: Format the user prompt with the clause text ---
-        # We need to handle two possible placeholder formats:
-        #   - {clause}   — the DEFAULT template uses this
-        #   - {sentence} — the YAML config (prompts.yaml) uses this
-        # The formatter picks the correct key based on which placeholder
-        # appears in the template.
+        # --- 步骤 1：用条款文本格式化用户提示词 ---
+        # 需处理两种占位符格式：
+        #   - {clause}   —— 默认模板使用此格式
+        #   - {sentence} —— YAML 配置（prompts.yaml）使用此格式
+        # 格式化器根据模板中出现的占位符选择正确的键。
         user_prompt = self._format_prompt(clause)
 
         logger.debug(
@@ -152,7 +137,7 @@ class LegalTripletExtractor:
             clause[:120] + ("..." if len(clause) > 120 else ""),
         )
 
-        # --- Step 2: Call the LLM ---
+        # --- 步骤 2：调用大语言模型 ---
         try:
             raw_response = self.client.complete_structured(
                 system_prompt=self.system_prompt,
@@ -164,8 +149,8 @@ class LegalTripletExtractor:
                 raw_response[:200] + ("..." if len(raw_response) > 200 else ""),
             )
         except RuntimeError as exc:
-            # The LLM client exhausted all retries.  Build a fallback triplet
-            # so the caller can continue processing other clauses.
+            # 大语言模型客户端已耗尽所有重试。构建回退三元组，
+            # 以便调用方继续处理其他条款。
             logger.error(
                 "LLM request failed for clause: %s",
                 exc,
@@ -175,11 +160,10 @@ class LegalTripletExtractor:
                 error=f"LLM request failed: {exc}",
             )
 
-        # --- Step 3: Parse the JSON response ---
+        # --- 步骤 3：解析 JSON 响应 ---
         parsed = parse_llm_response(raw_response)
 
-        # If parsing returned an empty dict, the response was completely
-        # unparseable.  Build a fallback triplet.
+        # 若解析返回空字典，说明响应完全无法解析。构建回退三元组。
         if not parsed:
             logger.warning(
                 "Could not parse LLM response into JSON dict. "
@@ -191,7 +175,7 @@ class LegalTripletExtractor:
                 error="JSON parse failure: no valid JSON found in response",
             )
 
-        # --- Step 4 & 5: Validate and normalize ---
+        # --- 步骤 4 与 5：校验与规范化 ---
         try:
             triplet = validate_and_normalize_triplet(parsed, clause)
             logger.debug(
@@ -208,9 +192,8 @@ class LegalTripletExtractor:
             return triplet
 
         except (ValueError, TypeError, KeyError) as exc:
-            # Validation against the Pydantic model failed.  This can happen
-            # when the LLM returns valid JSON that does not conform to the
-            # expected schema (e.g., missing required fields, wrong types).
+            # 对照 Pydantic 模型的校验失败。可能因大语言模型返回了
+            # 有效 JSON 但不符合预期模式（如缺少必填字段、类型错误）。
             logger.warning(
                 "Triplet validation failed for clause: %s. Parsed: %s",
                 exc,
@@ -222,21 +205,20 @@ class LegalTripletExtractor:
             )
 
     def extract_batch(self, clauses: List[str]) -> List[LegalTriplet]:
-        """Extract triplets from multiple clauses sequentially.
+        """顺序从多条条款中抽取三元组。
 
-        Each clause is processed independently via ``self.extract()``.
-        Errors propagate immediately — no silent catch-all.
+        每条条款通过 ``self.extract()`` 独立处理。
+        错误立即向上传播，不做静默捕获。
 
-        Args:
-            clauses:  List of contract clause strings.
+        参数:
+            clauses:  合同条款字符串列表。
 
-        Returns:
-            List of ``LegalTriplet`` objects, one per input clause, in the
-            same order.
+        返回:
+            ``LegalTriplet`` 对象列表，与输入条款一一对应、顺序一致。
 
-        Raises:
-            RuntimeError: If the LLM request fails.
-            ValueError: If parsing or validation fails.
+        异常:
+            RuntimeError: 大语言模型请求失败。
+            ValueError: 解析或校验失败。
         """
         results: List[LegalTriplet] = []
 
@@ -252,42 +234,38 @@ class LegalTripletExtractor:
         return results
 
     # ---------------------------------------------------------------------
-    # Prompt Formatting
+    # 提示词格式化
     # ---------------------------------------------------------------------
 
     def _format_prompt(self, clause: str) -> str:
-        """Insert the clause text into the user prompt template.
+        """将条款文本插入用户提示词模板。
 
-        Handles both ``{clause}`` (default template) and ``{sentence}``
-        (prompts.yaml template) placeholders automatically by checking
-        which placeholder appears in the loaded template string.
+        自动处理 ``{clause}``（默认模板）与 ``{sentence}``
+        （prompts.yaml 模板）两种占位符，根据已加载模板字符串
+        中出现的占位符进行判断。
 
-        The template is formatted using Python's ``str.format()``.  The
-        ``{{`` and ``}}`` escape sequences in the default template become
-        literal ``{`` and ``}`` characters in the final prompt — these
-        are part of the JSON example shown to the LLM.
+        模板使用 Python 的 ``str.format()`` 格式化。默认模板中的
+        ``{{`` 与 ``}}`` 转义序列在最终提示词中变为字面量 ``{`` 与 ``}``，
+        这些是大语言模型所见 JSON 示例的一部分。
 
-        Args:
-            clause:  The contract clause text to insert.
+        参数:
+            clause:  待插入的合同条款文本。
 
-        Returns:
-            The fully formatted prompt string ready for the LLM.
+        返回:
+            可供大语言模型使用的完整格式化提示词字符串。
         """
         template = self.user_prompt_template
 
-        # --- Determine which placeholder to use ---
-        # The YAML config uses {sentence}, the default uses {clause}.
-        # We detect the format from the template string itself so that
-        # the extractor works regardless of which prompt source is active.
+        # --- 确定使用哪种占位符 ---
+        # YAML 配置使用 {sentence}，默认模板使用 {clause}。
+        # 从模板字符串本身检测格式，使抽取器无论使用哪种提示词来源均可工作。
         if "{sentence}" in template:
             return template.format(sentence=clause)
         elif "{clause}" in template:
             return template.format(clause=clause)
         else:
-            # If the template has no recognized placeholder, we append the
-            # clause on a new line as a last resort.  This should not happen
-            # with the standard templates but guards against misconfigured
-            # custom prompts.
+            # 若模板无已识别的占位符，作为最后手段在新行追加条款。
+            # 标准模板不应出现此情况，但可防止自定义提示词配置错误。
             logger.warning(
                 "Prompt template has no {clause} or {sentence} placeholder. "
                 "Appending clause to the end."

@@ -31,45 +31,39 @@ def send_request_with_retry(
     messages: list[dict[str, str]],
     response_format: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Dispatch a chat completion request with retry + backoff.
+    """以重试与退避策略发送聊天补全请求。
 
-    This is the single code path for all completion requests.  It
-    encapsulates the retry loop so that ``complete()`` and
-    ``complete_structured()`` only differ in how they build the
-    ``response_format`` argument.
+    所有补全请求的单一代码路径。封装重试循环，使 ``complete()`` 与
+    ``complete_structured()`` 仅在 ``response_format`` 参数的构建方式上不同。
 
-    Retry strategy:
-    - Catch ``APIConnectionError``, ``APITimeoutError``,
-      ``RateLimitError``, and generic ``APIError`` / ``APIStatusError``.
-    - On each failure, sleep for ``2^i`` seconds where ``i`` is the
-      attempt number (0-indexed), giving backoff intervals of 1s, 2s,
-      4s, ... up to ``2^(max_retries-1)``.
-    - Log a warning on each retry attempt so operators can detect
-      persistent connectivity issues.
-    - After exhausting ``max_retries``, log an error and raise
-      ``RuntimeError`` with the chain of original exceptions preserved.
+    重试策略:
+    - 捕获 ``APIConnectionError``、``APITimeoutError``、
+      ``RateLimitError`` 及通用 ``APIError`` / ``APIStatusError``。
+    - 每次失败后休眠 ``2^i`` 秒，``i`` 为尝试序号（从 0 起），
+      退避间隔为 1s、2s、4s……直至 ``2^(max_retries-1)``。
+    - 每次重试记录警告日志，便于运维人员发现持续性连接问题。
+    - 耗尽 ``max_retries`` 后记录错误并抛出 ``RuntimeError``，
+      保留原始异常链。
 
-    Args:
-        config:           ``ClientConfig`` with model, generation params,
-                          and reliability settings.
-        client:           An ``openai.OpenAI`` instance.
-        messages:         List of message dicts with 'role' and 'content'.
-        response_format:  Optional response_format dict for structured output.
+    参数:
+        config:           含模型、生成参数与可靠性设置的 ``ClientConfig``。
+        client:           ``openai.OpenAI`` 实例。
+        messages:         含 'role' 与 'content' 的消息字典列表。
+        response_format:  结构化输出的可选 response_format 字典。
 
-    Returns:
-        The text content of the first choice.
+    返回:
+        第一个选项的文本内容。
 
-    Raises:
-        RuntimeError:  After all retries are exhausted.
+    异常:
+        RuntimeError:  所有重试耗尽后抛出。
     """
     last_exception: Optional[Exception] = None
 
     for attempt in range(config.max_retries + 1):
         try:
-            # --- Build the API call parameters ---
-            # All generation parameters come from ClientConfig so every
-            # call uses the same settings.  We use keyword arguments to
-            # make it clear which parameter is which.
+            # --- 构建 API 调用参数 ---
+            # 所有生成参数来自 ClientConfig，确保每次调用使用相同设置。
+            # 使用关键字参数以明确各参数含义。
             kwargs: Dict[str, Any] = {
                 "model": config.model,
                 "messages": messages,
@@ -78,13 +72,12 @@ def send_request_with_retry(
                 "seed": config.seed,
             }
 
-            # Only include response_format if specified — the base
-            # complete() method does not set it.
+            # 仅在指定时包含 response_format——基础 complete() 方法不设置此项。
             if response_format is not None:
                 kwargs["response_format"] = response_format
 
-            # Include extra_body for provider-specific options (e.g.,
-            # llama.cpp server settings like cache_prompt, top_k, etc.).
+            # 包含 extra_body 以支持提供商特定选项（如 llama.cpp 的
+            # cache_prompt、top_k 等服务器设置）。
             if config.extra_body is not None:
                 kwargs["extra_body"] = config.extra_body
 
@@ -96,16 +89,16 @@ def send_request_with_retry(
                 len(messages),
             )
 
-            # --- Execute the API call ---
+            # --- 执行 API 调用 ---
             response = client.chat.completions.create(**kwargs)
 
-            # --- Extract the response text ---
-            # With temperature=0.0 there is exactly one choice.
+            # --- 提取响应文本 ---
+            # temperature=0.0 时恰好有一个选项。
             msg = response.choices[0].message
             content = msg.content or ""
 
-            # Some models (e.g. Gemma 4 with thinking) may leave content
-            # empty while putting text in reasoning_content.
+            # 部分模型（如带 thinking 的 Gemma 4）可能 content 为空，
+            # 而将文本放在 reasoning_content 中。
             if not content.strip():
                 reasoning = getattr(msg, "reasoning_content", None)
                 if reasoning:
@@ -114,16 +107,15 @@ def send_request_with_retry(
                     )
                     content = reasoning
 
-            # The API may return None for content in edge cases (e.g.,
-            # content filter triggered).  Treat this as an empty string
-            # rather than crashing so the caller's JSON parser handles it.
+            # API 在边缘情况下可能返回 None 内容（如内容过滤触发）。
+            # 视为空字符串而非崩溃，由调用方的 JSON 解析器处理。
             if not content:
                 logger.warning(
                     "LLM returned empty content on attempt %d",
                     attempt + 1,
                 )
 
-            # Log token usage for cost/performance tracking.
+            # 记录 token 用量以供成本/性能追踪。
             if response.usage is not None:
                 logger.debug(
                     "Request complete: prompt_tokens=%d, completion_tokens=%d, "
@@ -136,9 +128,8 @@ def send_request_with_retry(
             return content
 
         except (APIConnectionError, APITimeoutError) as exc:
-            # --- Transient network errors ---
-            # Connection refused, DNS failure, or request timeout.
-            # These are likely temporary — retry with backoff.
+            # --- 瞬时网络错误 ---
+            # 连接拒绝、DNS 失败或请求超时。可能为暂时性问题，退避后重试。
             last_exception = exc
             logger.warning(
                 "Network error on attempt %d/%d: %s",
@@ -147,13 +138,13 @@ def send_request_with_retry(
                 exc,
             )
             if attempt < config.max_retries:
-                backoff = 2 ** attempt  # 1s, 2s, 4s, ...
+                backoff = 2 ** attempt  # 1s、2s、4s……
                 logger.info("Retrying in %ds (exponential backoff)...", backoff)
                 time.sleep(backoff)
 
         except RateLimitError as exc:
-            # --- Server-side rate limiting ---
-            # llama.cpp may apply rate limits.  Wait and retry.
+            # --- 服务端速率限制 ---
+            # llama.cpp 可能施加速率限制。等待后重试。
             last_exception = exc
             logger.warning(
                 "Rate limit hit on attempt %d/%d: %s",
@@ -167,10 +158,9 @@ def send_request_with_retry(
                 time.sleep(backoff)
 
         except (APIError, APIStatusError) as exc:
-            # --- Server errors (5xx) or client errors (4xx) ---
-            # Retry on 5xx (server fault).  For 4xx (bad request), the
-            # retry is unlikely to help but we attempt once in case the
-            # issue is a transient server state misclassified as 4xx.
+            # --- 服务器错误（5xx）或客户端错误（4xx）---
+            # 对 5xx（服务端故障）重试。对 4xx（错误请求）重试通常无效，
+            # 但若问题为被误分类为 4xx 的瞬时服务端状态，仍尝试一次。
             last_exception = exc
             logger.warning(
                 "API error on attempt %d/%d (status=%s): %s",
@@ -184,8 +174,8 @@ def send_request_with_retry(
                 logger.info("Retrying in %ds (exponential backoff)...", backoff)
                 time.sleep(backoff)
 
-    # --- All retries exhausted ---
-    # We preserve the original exception chain for debugging.
+    # --- 所有重试耗尽 ---
+    # 保留原始异常链以便调试。
     logger.error(
         "All %d retry attempts exhausted for model=%s. Last error: %s",
         config.max_retries + 1,

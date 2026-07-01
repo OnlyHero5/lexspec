@@ -1,16 +1,10 @@
 """
-Clause selection strategies for building the LexSpec evaluation corpus.
-
-Supports two modes:
-  - ``select_all_clauses``:  Return all valid parsed clauses (full mode).
-  - ``select_balanced_testset``: Stratified sampling to meet per-phenomenon
-    quotas, prioritizing rare phenomena.
+构建 LexSpec 评估语料库的条款选择策略。
 """
 
 from __future__ import annotations
 
 import random
-from collections import Counter, defaultdict
 from typing import Dict, List
 
 from src.linguistic.stanza_parser import StanzaParser
@@ -21,10 +15,15 @@ logger = get_logger(__name__)
 
 
 def select_all_clauses(clause_records: List[Dict]) -> List[Dict]:
-    """Full mode: return all valid parsed clauses (excluding definition clauses).
+    """全量模式：返回全部有效已解析条款（排除定义性条款）。
 
-    Definition clauses ("X means Y") lack operative legal actions and cannot
-    yield meaningful triplets, so they are excluded from the test set.
+    参数:
+        clause_records: ``build_clause_records`` 产出的记录列表，每条含
+            ``text``、``phenomena``、``source`` 等键。
+
+    返回:
+        过滤后的条款 dict 列表；每条新增 ``clause_id``（格式 ``C-00001``），
+        且 ``phenomena.is_definition == True`` 的条目已排除。
     """
     result: List[Dict] = []
     for i, record in enumerate(clause_records):
@@ -39,56 +38,38 @@ def select_all_clauses(clause_records: List[Dict]) -> List[Dict]:
 def select_balanced_testset(
     parser: StanzaParser,
     clauses: List[str],
-    target_count: int = 100,
-    min_passive: int = 20,
-    min_conditional: int = 20,
-    min_relative: int = 15,
-    min_long_distance: int = 20,
-    min_negation: int = 15,
+    target_count: int,
+    phenomenon_quotas: Dict[str, int],
+    random_seed: int,
+    long_distance_mdd: float,
     source_label: str = "cuad_v1",
 ) -> List[Dict]:
-    """Select a balanced test set from candidate clauses via stratified sampling.
+    """通过分层抽样选取覆盖各语言现象的平衡测试集。
 
-    Algorithm:
-      1. Parse each clause, detect its language phenomena.
-      2. Group clauses into candidate pools by phenomenon.
-      3. Fill quotas in order of phenomenon rarity (rarest first),
-         prioritizing clauses that cover multiple underfilled quotas.
-      4. If a quota cannot be met exactly (extremely rare), fill the
-         remaining slots up to target_count.
+    先按 ``phenomenon_quotas`` 为被动、条件、关系从句等现象填充配额，
+    再按多现象重叠度优先填充剩余名额至 ``target_count``。
 
-    Definition clauses are excluded before sampling.
+    参数:
+        parser: 已初始化的 ``StanzaParser``，用于依存解析与现象检测。
+        clauses: 候选条款文本字符串列表（通常来自 CUAD 分句结果）。
+        target_count: 目标测试集总条数。
+        phenomenon_quotas: 现象池名 → 最低条数 的字典（由
+            ``get_phenomenon_quotas`` 生成）。
+        random_seed: 随机种子，控制洗牌与抽样顺序的可复现性。
+        long_distance_mdd: 判定长距离依存现象的平均依存距离阈值。
+        source_label: 写入每条记录的 ``source`` 字段（如 ``"cuad_v1"``）。
 
-    Each selected clause is stored as a dict with keys:
-      - ``clause_id``:    unique zero-padded ID (e.g. "C-0001")
-      - ``text``:         original clause text
-      - ``phenomena``:    dict of boolean phenomenon flags
-      - ``source``:       data source label
-
-    Args:
-        parser:            StanzaParser for clause analysis.
-        clauses:           Candidate clause strings.
-        target_count:      Desired total number of clauses.
-        min_passive:       Minimum passive voice clauses.
-        min_conditional:   Minimum conditional clause clauses.
-        min_relative:      Minimum relative clause clauses.
-        min_long_distance: Minimum long-distance dependency clauses.
-        min_negation:      Minimum negation clauses.
-        source_label:      Data source label.
-
-    Returns:
-        List of selected clause dicts, one per clause.
+    返回:
+        已选条款 dict 列表，每条含 ``clause_id``、``text``、``phenomena``、
+        ``source``；``clause_id`` 格式为 ``C-0001``。
     """
-    rng = random.Random(42)
-
-    # Shuffle to avoid document-order bias.
+    rng = random.Random(random_seed)
     rng.shuffle(clauses)
 
     clause_records, phenomenon_pools = build_clause_records(
-        parser, clauses, source_label,
+        parser, clauses, source_label, long_distance_mdd=long_distance_mdd,
     )
 
-    # --- Exclude definition clauses ---
     def_indices = {
         i for i, r in enumerate(clause_records)
         if r["phenomena"].get("is_definition", False)
@@ -100,24 +81,15 @@ def select_balanced_testset(
     if def_indices:
         logger.info("Excluded %d definition clauses from candidate pool", len(def_indices))
 
-    # Fill quotas in ascending pool size order (rare phenomena first).
     selected: set = set()
-    quotas = {
-        "passive": min_passive,
-        "conditional": min_conditional,
-        "relative_clause": min_relative,
-        "long_distance": min_long_distance,
-        "negation": min_negation,
-    }
-    fill_order = sorted(quotas.keys(), key=lambda k: len(phenomenon_pools.get(k, [])))
+    fill_order = sorted(phenomenon_quotas.keys(), key=lambda k: len(phenomenon_pools.get(k, [])))
 
     for phen_name in fill_order:
-        quota = quotas[phen_name]
+        quota = phenomenon_quotas[phen_name]
         pool = phenomenon_pools.get(phen_name, [])
         rng.shuffle(pool)
 
         for idx in pool:
-            # Check if quota for this phenomenon is already met.
             current_count = sum(
                 1 for i in selected
                 if clause_records[i]["phenomena"].get(phen_name, False)
@@ -127,8 +99,6 @@ def select_balanced_testset(
             if idx not in selected:
                 selected.add(idx)
 
-    # --- Fill remaining slots to target_count ---
-    # Prefer clauses with at least one phenomenon and non-definition.
     remaining_indices = [
         i for i in range(len(clause_records))
         if i not in selected and i not in def_indices
@@ -141,21 +111,17 @@ def select_balanced_testset(
     )
 
     while len(selected) < target_count and remaining_indices:
-        idx = remaining_indices.pop(0)
-        selected.add(idx)
+        selected.add(remaining_indices.pop(0))
 
-    # --- Build final output ---
     result: List[Dict] = []
     for i, idx in enumerate(sorted(selected)):
         record = dict(clause_records[idx])
         record["clause_id"] = f"C-{i + 1:04d}"
         result.append(record)
 
-    # Statistics log.
     phen_counts = {
         phen: sum(1 for r in result if r["phenomena"][phen])
-        for phen in quotas
+        for phen in phenomenon_quotas
     }
     logger.info("Selected %d clauses: %s", len(result), phen_counts)
-
     return result

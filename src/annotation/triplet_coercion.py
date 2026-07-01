@@ -1,16 +1,16 @@
 """
-Triplet Coercion Utilities
-===========================
-Functions for coercing raw LLM JSON output into LegalTriplet-compatible
-dictionaries and inferring condition types from text.
+三元组强制转换工具
+==================
+将原始 LLM JSON 输出强制转换为 LegalTriplet 兼容字典，
+并从文本推断条件类型。
 
-These are shared across the annotation pipeline (llm_annotator, reviewer)
-and the correction pipeline (reflexion response parser).
+供标注流水线（llm_annotator、reviewer）
+与纠错流水线（reflexion 响应解析器）共用。
 
-Exported:
-  - coerce_to_triplet:       Convert raw parsed JSON data to Optional[LegalTriplet]
-  - normalize_to_canonical:  Convert annotation-style JSON to LegalTriplet format
-  - infer_condition_type:    Infer condition type from condition text (CANONICAL version)
+导出：
+  - coerce_to_triplet:       将原始解析 JSON 转为 Optional[LegalTriplet]
+  - normalize_to_canonical:  将标注式 JSON 转为 LegalTriplet 格式
+  - infer_condition_type:    从条件文本推断条件类型（规范版本）
 """
 
 from __future__ import annotations
@@ -24,17 +24,17 @@ logger = get_logger(__name__)
 
 
 def coerce_to_triplet(data) -> Optional[LegalTriplet]:
-    """Coerce parsed JSON data into a LegalTriplet.
+    """将解析后的 JSON 数据强制转换为 LegalTriplet。
 
-    Handles two input formats:
-      1. Canonical format: {"subject": {...}, "action": {...}, "condition": {...}}
-      2. Annotation format: {"predicate": "...", "subject": {...}, "object": {...}, ...}
+    支持两种输入格式：
+      1. 规范格式：{"subject": {...}, "action": {...}, "condition": {...}}
+      2. 标注格式：{"predicate": "...", "subject": {...}, "object": {...}, ...}
 
-    Args:
-        data: JSON parse result, can be dict or list.
+    参数：
+        data: JSON 解析结果，可为 dict 或 list。
 
-    Returns:
-        LegalTriplet if coercion succeeds, None otherwise.
+    返回：
+        强制转换成功返回 LegalTriplet，否则 None。
     """
     if isinstance(data, list):
         if len(data) == 0:
@@ -57,35 +57,35 @@ def coerce_to_triplet(data) -> Optional[LegalTriplet]:
 
 
 def normalize_to_canonical(data: dict) -> dict:
-    """Normalize annotation-style JSON to LegalTriplet canonical format.
+    """将标注式 JSON 规范化为 LegalTriplet 标准格式。
 
-    The annotation prompt may produce:
+    标注提示可能产生：
       {
-        "predicate": "<verb>",
+        "predicate": "<动词>",
         "subject": {"text": "...", "role": "obligor|right_holder|..."},
         "object": {"text": "...", "role": "direct_object|..."},
-        "condition": "<text or null>"
+        "condition": "<文本或 null>"
       }
 
-    LegalTriplet expects:
+    LegalTriplet 期望：
       {
         "subject": {"text": "...", "role": "<LegalRole>"},
         "action": {"predicate": "...", "object": "..."},
         "condition": {"text": "...", "type": "<ConditionType>"}
       }
 
-    This method maps between the two formats, handling None condition values,
-    string vs dict objects, missing fields, and other edge cases.
+    本方法在两种格式间映射，处理 None 条件、
+    字符串与 dict 宾语、缺失字段等边界情况。
 
-    Args:
-        data: Annotation-style dict from LLM output.
+    参数：
+        data: LLM 输出的标注式 dict。
 
-    Returns:
-        Dict compatible with LegalTriplet.model_validate().
+    返回：
+        与 LegalTriplet.model_validate() 兼容的 dict。
     """
     result: dict = {}
 
-    # --- subject ---
+    # --- 主语 ---
     if "subject" in data and isinstance(data["subject"], dict):
         result["subject"] = {
             "text": str(data["subject"].get("text", "")),
@@ -96,7 +96,7 @@ def normalize_to_canonical(data: dict) -> dict:
     else:
         result["subject"] = {"text": "", "role": "other"}
 
-    # --- action ---
+    # --- 动作 ---
     action: dict = {}
     if "action" in data and isinstance(data["action"], dict):
         action["predicate"] = str(data["action"].get("predicate", ""))
@@ -110,11 +110,11 @@ def normalize_to_canonical(data: dict) -> dict:
             action["object"] = str(obj)
     result["action"] = action
 
-    # --- condition ---
+    # --- 条件 ---
     condition: dict = {"text": "", "type": "none"}
     raw_condition = data.get("condition")
     if raw_condition is None or raw_condition == "" or raw_condition == "null":
-        pass  # No condition -- use defaults.
+        pass  # 无条件 — 使用默认值。
     elif isinstance(raw_condition, str):
         condition["text"] = raw_condition
         condition["type"] = infer_condition_type(raw_condition)
@@ -129,23 +129,23 @@ def normalize_to_canonical(data: dict) -> dict:
 
 
 def infer_condition_type(text: str) -> str:
-    """Infer condition type from the condition clause text.
+    """从条件从句文本推断条件类型。
 
-    Uses lexical markers (at the start of the condition text) to classify
-    the condition as temporal, trigger, or exception. This is a heuristic
-    fallback used when the LLM does not return an explicit condition type.
+    使用条件文本开头的词汇标记，将条件分类为
+    时间型、触发型或例外型。当 LLM 未返回显式条件类型时
+    用作启发式回退。
 
-    Args:
-        text: Condition clause text.
+    参数：
+        text: 条件从句文本。
 
-    Returns:
-        One of "temporal", "trigger", "exception", or "none".
+    返回：
+        "temporal"、"trigger"、"exception" 或 "none" 之一。
     """
     text_lower = text.lower().strip()
     if not text_lower:
         return "none"
 
-    # Temporal markers: time-bound conditions.
+    # 时间标记：有时间界限的条件。
     temporal_markers = [
         "within", "after", "before", "upon", "when",
         "during", "until", "on or before", "no later than",
@@ -156,7 +156,7 @@ def infer_condition_type(text: str) -> str:
         if text_lower.startswith(marker):
             return "temporal"
 
-    # Exception markers: carve-outs from obligations.
+    # 例外标记：义务范围的除外条款。
     exception_markers = [
         "unless", "except", "other than", "save as",
         "save for", "but for", "with the exception of",
@@ -165,7 +165,7 @@ def infer_condition_type(text: str) -> str:
         if text_lower.startswith(marker):
             return "exception"
 
-    # Trigger markers: event-based conditions.
+    # 触发标记：事件型条件。
     trigger_markers = [
         "if", "in the event that", "in the event of",
         "in case", "in case of", "should", "provided that",
@@ -176,6 +176,6 @@ def infer_condition_type(text: str) -> str:
         if text_lower.startswith(marker):
             return "trigger"
 
-    # No marker matched but text is non-empty -- default to trigger
-    # (most condition clauses in legal text are event-triggered).
+    # 未匹配标记但文本非空 — 默认为触发型
+    # （法律文本中多数条件从句为事件触发）。
     return "trigger"

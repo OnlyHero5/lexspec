@@ -129,7 +129,7 @@
 │  │                              step_02 (双模型标注)              │   │
 │  │                                        │                     │   │
 │  │                                        v                     │   │
-│  │                              data/annotations/gold_triplets   │   │
+│  │                              data/processed/gold_triplets.jsonl │
 │  │                                        │                     │   │
 │  │                         ┌──────────────┼──────────────┐      │   │
 │  │                         v              v              v      │   │
@@ -252,11 +252,11 @@
 │                                         #   文本规范化、现象抽样阈值
 │
 ├── src/                                  # 源代码
-│   ├── __init__.py                       #   包文档与版本信息 (v0.1.0)
+│   ├── __init__.py                       #   包文档与版本信息 (v1.0.0)
 │   │
 │   ├── extraction/                       # 抽取模块 — 大语言模型调用与结果解析
 │   │   ├── __init__.py                   #     公开 API 导出
-│   │   ├── schema.py                     #     Pydantic v2 数据模型 (1,200+ 行)
+│   │   ├── schema/                       #     Pydantic v2 数据模型包
 │   │   │                                 #     LegalTriplet, Subject, Action,
 │   │   │                                 #     Condition, DependencyTree, Token,
 │   │   │                                 #     ValidationResult, ErrorCase 等
@@ -290,10 +290,9 @@
 │   ├── correction/                       # 修正模块 — Reflexion 自我修正
 │   │   ├── __init__.py                   #     公开 API 导出
 │   │   ├── reflexion.py                  #     ReflexionGenerator
-│   │   │                                 #     generate_feedback() →
-│   │   │                                 #     correct() → 修正后 LegalTriplet
-│   │   └── feedback_templates.py         #     硬编码备用反馈模板
-│   │                                     #     6 类错误提示词 (ERROR_HINTS)
+│   │   ├── reflexion_error_mapper.py     #     校验结果 → Reflexion 错误提示键
+│   │   ├── prompt_loader.py              #     提示词加载 (re-export)
+│   │   └── response_parser.py            #     Reflexion 响应解析
 │   │
 │   ├── annotation/                       # 标注模块 — 双模型金标构建
 │   │   ├── __init__.py                   #     公开 API 导出
@@ -326,12 +325,11 @@
 │   │
 │   └── utils/                            # 工具模块
 │       ├── __init__.py                   #     公开 API 导出
-│       ├── config.py                      #     项目级配置加载器
-│       │                                 #     构建实验客户端/标注客户端/
-│       │                                 #     Stanza 解析器
+│       ├── config.py                      #     模型配置加载 (model.yaml)
+│       ├── constraints.py                 #     约束配置加载 (constraints.yaml)
 │       ├── io.py                         #     JSONL 读写、Pydantic 序列化
 │       ├── logging.py                    #     集中式日志配置
-│       └── prompt_loader.py             #     提示词统一加载与回退
+│       └── prompt_loader.py             #     统一提示词加载 (prompts.yaml)
 │
 ├── experiments/                          # 实验脚本 (7 步流水线)
 │   ├── run_pipeline.sh                   #   ★ 一键运行完整流水线
@@ -348,8 +346,12 @@
 │   │   └── CUAD_v1/                      #     CUAD v1 合同数据集
 │   ├── processed/                        #   预处理后的数据
 │   │   └── lexspec_100.jsonl             #     LexSpec-100 测试集
-│   └── annotations/                      #   标注文件
+│   └── annotations/                      #   标注中间文件 (运行时生成)
 │       └── gemma_annotations.jsonl       #     Gemma 模型标注结果
+│
+├── data/processed/                       #   预处理与金标输出
+│   ├── lexspec_100.jsonl                 #     LexSpec-100 测试集
+│   └── gold_triplets.jsonl               #     共识合并后的金标三元组
 │
 ├── outputs/                              # 实验输出（运行时生成）
 │   ├── predictions/                      #   三元组预测结果
@@ -448,10 +450,14 @@ chmod +x experiments/run_pipeline.sh
 # 跳过已完成的步骤
 ./experiments/run_pipeline.sh --skip-01 --skip-02
 
-# 使用自定义配置文件和输出目录
+# 自定义配置
 ./experiments/run_pipeline.sh \
-  --config /path/to/custom_model.yaml \
-  --output-dir /path/to/outputs/
+  --config configs/model.yaml \
+  --constraints configs/constraints.yaml \
+  --output-dir outputs/
+```
+
+步骤 02 在流水线中自动执行完整的四阶段标注（Gemma 标注 → Qwen 标注 → 双向交叉审查 → merge）。
 
 # 使用自定义虚拟环境
 VENV_PATH=/path/to/venv ./experiments/run_pipeline.sh
@@ -553,7 +559,11 @@ else:
 
 ## 6. 配置说明
 
-所有实验参数均存储在版本控制的 YAML 配置文件中。每次实验运行的可复现性均由配置文件唯一定义。
+所有实验参数均存储在版本控制的 YAML 配置文件中。**运行时参数必须从 YAML 加载；缺失或无效配置将立即抛出异常，禁止静默回退或硬编码默认值。**
+
+- `configs/model.yaml` — 服务器、模型、Stanza、Reflexion 迭代参数
+- `configs/constraints.yaml` — UD 约束、F1 权重、文本规范化、语料抽样、距离阈值
+- `configs/prompts.yaml` — 标注、抽取、Reflexion 提示词（含 `error_hints.default`）
 
 ### 6.1 `configs/model.yaml` — 模型与服务器配置
 
@@ -616,7 +626,9 @@ constraints.yaml
 ├── validation                     # 校验阈值
 │   ├── condition_overlap          #   0.5 (条件从句 IoU 最低阈值)
 │   ├── subject_match              #   0.8 (主语模糊匹配阈值)
-│   └── object_match               #   0.8 (宾语模糊匹配阈值)
+│   ├── object_match               #   0.8 (宾语模糊匹配阈值)
+│   ├── long_distance_tokens       #   3 (论元依存距离 — Reflexion/错误分析)
+│   └── long_distance_mdd          #   6.0 (语料现象检测 MDD 阈值)
 │
 ├── f1_weights                     # 加权 F1 各分量权重
 │   ├── subject_text               #   0.35
@@ -627,15 +639,21 @@ constraints.yaml
 │
 ├── normalization                  # 文本规范化规则
 │   ├── remove_articles            #   去除冠词 (a/an/the)
-│   ├── lemmatize                  #   词形还原
+│   ├── lemmatize                  #   词形还原 (评估管线)
 │   ├── number_normalization       #   数字规范化 (thirty ↔ 30)
-│   └── party_aliases              #   方别称映射
+│   └── use_party_aliases          #   是否启用 party_alias_mappings
+│
+├── party_alias_mappings           # 方别称映射 (canonical → aliases[])
+│
+├── corpus_sampling                # 语料构建默认参数
+│   ├── target_count_default       #   100
+│   └── random_seed                #   42
 │
 └── phenomenon_thresholds          # 测试集分层抽样最低比例
-    ├── passive                    #   0.20
+    ├── passive                    #   0.20 → min 20/100
     ├── conditional                #   0.25
     ├── relative                   #   0.15
-    ├── long_distance              #   0.15
+    ├── long_distance              #   0.15 (MDD > long_distance_mdd)
     └── negation                   #   0.15
 ```
 
@@ -656,11 +674,10 @@ prompts.yaml
 │       └── user                  #     抽取用户模板 {sentence}
 │
 └── reflexion                      # Reflexion 修正提示词
-    ├── feedback_template         #   反馈模板
-    │                              #   {original_sentence}
-    │                              #   {previous_output}
-    │                              #   {error_feedback}
-    └── error_hints                #   6 类错误修正提示
+    ├──     feedback_template         #   反馈模板
+    │                              #   {error_type}, {text}, {prediction},
+    │                              #   {linguistic_evidence}, {specific_hint}
+    └── error_hints                #   错误修正提示 (含必需的 default)
         ├── passive_subject       #     被动语态主语错误
         ├── passive_object        #     被动语态宾语错误
         ├── condition_boundary    #     条件从句边界错误
@@ -836,7 +853,7 @@ prompts.yaml
 │                                       │                          │
 │                                       v                          │
 │                              金标 LegalTriplet                   │
-│                           (保存为 gold_triplets.jsonl)            │
+│                           (保存为 data/processed/gold_triplets.jsonl)
 └───────────────────────────────────────────────────────────────────┘
 ```
 

@@ -1,17 +1,7 @@
 """
-提示词加载器 —— LLMAnnotator 的统一提示词管理
-============================================
+统一提示词加载器 —— 所有大语言模型提示词模板均来自 configs/prompts.yaml。
 
-从 ``configs/prompts.yaml`` 加载提示词模板。配置缺失或格式错误时直接
-抛出异常，禁止静默回退到硬编码备用提示词。
-
-使用示例::
-
-    from src.utils.prompt_loader import 提示词加载器
-
-    loader = 提示词加载器("configs/prompts.yaml")
-    system, user = loader.加载标注提示词()
-    system, user = loader.加载审查提示词()
+配置缺失或不完整时立即抛出异常；无硬编码回退提示词。
 """
 
 from __future__ import annotations
@@ -26,126 +16,111 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-class 提示词加载器:
-    """从 YAML 配置文件加载提示词模板。
-
-    所有提示词必须来自配置文件。配置缺失或字段不完整时抛出异常。
-
-    Attributes:
-        config: 解析后的 YAML 配置字典。
-        source_path: 配置文件路径（用于错误消息）。
-    """
-
-    def __init__(self, prompts_path: str = "configs/prompts.yaml") -> None:
-        """加载并解析提示词配置文件。
-
-        Args:
-            prompts_path: 提示词 YAML 配置文件路径。
-
-        Raises:
-            FileNotFoundError: 配置文件不存在。
-            yaml.YAMLError: YAML 解析失败。
-        """
-        self.source_path = prompts_path
-        path = Path(prompts_path)
-        if not path.exists():
-            raise FileNotFoundError(
-                f"提示词配置文件未找到: '{prompts_path}'。请确认 configs/prompts.yaml 存在。"
-            )
-        with open(path, "r", encoding="utf-8") as fh:
-            self.config = yaml.safe_load(fh)
-        if self.config is None:
-            raise ValueError(f"提示词配置文件 '{prompts_path}' 为空。")
-        logger.info("已从 %s 加载提示词配置", self.source_path)
-
-    # ------------------------------------------------------------------
-    # 标注提示词
-    # ------------------------------------------------------------------
-
-    def 加载标注提示词(self) -> Tuple[str, str]:
-        """加载标注阶段的 (system_prompt, user_template)。
-
-        Returns:
-            (系统提示词, 用户提示词模板) 元组。
-
-        Raises:
-            KeyError: 缺少 annotation.system 或 annotation.user。
-        """
-        section = self.config.get("annotation", {})
-        system = self._提取必需字符串(section, "system", "annotation.system")
-        user = self._提取必需字符串(section, "user", "annotation.user")
-
-        if "{dependency_info}" in user:
-            user = user.replace("{dependency_info}", "")
-            logger.debug("已从标注用户模板中移除 {dependency_info} 占位符")
-
-        return system.strip(), user.strip()
-
-    # ------------------------------------------------------------------
-    # 审查提示词
-    # ------------------------------------------------------------------
-
-    def 加载审查提示词(self) -> Tuple[str, str]:
-        """加载交叉审查阶段的 (system_prompt, user_template)。
-
-        Returns:
-            (系统提示词, 用户提示词模板) 元组。
-
-        Raises:
-            KeyError: 缺少 annotation.review.system 或 annotation.review.user。
-        """
-        review = self.config.get("annotation", {}).get("review", {})
-        system = self._提取必需字符串(review, "system", "annotation.review.system")
-        user = self._提取必需字符串(review, "user", "annotation.review.user")
-        return system.strip(), user.strip()
-
-    # ------------------------------------------------------------------
-    # Reflexion 提示词
-    # ------------------------------------------------------------------
-
-    def 加载Reflexion提示词(self) -> Tuple[str, Dict[str, str]]:
-        """加载 Reflexion 自我修正阶段的提示词。
-
-        Returns:
-            (feedback_template, error_hints_dict) 元组。
-
-        Raises:
-            KeyError: 缺少 reflexion.feedback_template 或 reflexion.error_hints。
-        """
-        reflexion = self.config.get("reflexion", {})
-        feedback = self._提取必需字符串(
-            reflexion, "feedback_template", "reflexion.feedback_template"
+def _load_prompts_document(prompts_path: str) -> Dict:
+    path = Path(prompts_path)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Prompts config file not found: '{prompts_path}'. "
+            "Create it from configs/prompts.yaml."
         )
-        error_hints = reflexion.get("error_hints", {})
-        if not isinstance(error_hints, dict) or not error_hints:
-            raise KeyError(
-                f"'{self.source_path}' 中缺少 'reflexion.error_hints'，"
-                "或该值为空。必须为所有错误类别提供修正提示词。"
-            )
-        return feedback.strip(), error_hints
+    with open(path, "r", encoding="utf-8") as fh:
+        config = yaml.safe_load(fh)
+    if not isinstance(config, dict) or not config:
+        raise ValueError(f"Prompts config '{prompts_path}' is empty or invalid.")
+    return config
 
-    # ------------------------------------------------------------------
-    # 内部工具
-    # ------------------------------------------------------------------
 
-    def _提取必需字符串(self, section: Dict, key: str, full_path: str) -> str:
-        """从配置段中提取必需的字符串值，缺失或为空时抛出异常。
+def _require_string(section: Dict, key: str, full_path: str, prompts_path: str) -> str:
+    value = section.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    raise KeyError(
+        f"Missing or empty '{full_path}' in '{prompts_path}'. "
+        "All prompts must be defined in configs/prompts.yaml."
+    )
 
-        Args:
-            section: YAML 配置段字典。
-            key: 键名。
-            full_path: 完整路径（用于错误消息，如 'annotation.system'）。
 
-        Returns:
-            提取到的字符串（已去除首尾空白）。
+def load_extraction_prompts(prompts_path: str) -> Dict[str, str]:
+    """加载基线抽取的系统/用户提示词。"""
+    config = _load_prompts_document(prompts_path)
+    extraction = config.get("extraction")
+    if not isinstance(extraction, dict):
+        raise KeyError(f"No 'extraction' section in '{prompts_path}'.")
+    baseline = extraction.get("baseline")
+    if not isinstance(baseline, dict):
+        raise KeyError(f"No 'extraction.baseline' section in '{prompts_path}'.")
 
-        Raises:
-            KeyError: 键缺失或值为空。
-        """
-        value = section.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
+    system = _require_string(baseline, "system", "extraction.baseline.system", prompts_path)
+    user = _require_string(baseline, "user", "extraction.baseline.user", prompts_path)
+    logger.info("Loaded extraction prompts from '%s'", prompts_path)
+    return {"system": system, "user": user, "source": str(Path(prompts_path).resolve())}
+
+
+def load_annotation_prompts(prompts_path: str) -> Tuple[str, str]:
+    """加载标注（system, user_template）提示词。"""
+    config = _load_prompts_document(prompts_path)
+    annotation = config.get("annotation")
+    if not isinstance(annotation, dict):
+        raise KeyError(f"No 'annotation' section in '{prompts_path}'.")
+
+    system = _require_string(annotation, "system", "annotation.system", prompts_path)
+    user = _require_string(annotation, "user", "annotation.user", prompts_path)
+    if "{dependency_info}" in user:
+        user = user.replace("{dependency_info}", "")
+        logger.debug("Removed {dependency_info} placeholder from annotation user template")
+
+    logger.info("Loaded annotation prompts from '%s'", prompts_path)
+    return system, user
+
+
+def load_review_prompts(prompts_path: str) -> Tuple[str, str]:
+    """加载跨模型审核（system, user_template）提示词。"""
+    config = _load_prompts_document(prompts_path)
+    review = config.get("annotation", {}).get("review")
+    if not isinstance(review, dict):
+        raise KeyError(f"No 'annotation.review' section in '{prompts_path}'.")
+    system = _require_string(review, "system", "annotation.review.system", prompts_path)
+    user = _require_string(review, "user", "annotation.review.user", prompts_path)
+    logger.info("Loaded review prompts from '%s'", prompts_path)
+    return system, user
+
+
+def load_reflexion_config(prompts_path: str) -> Tuple[str, str, Dict[str, str]]:
+    """加载 Reflexion 反馈模板、系统提示词与错误提示。"""
+    config = _load_prompts_document(prompts_path)
+    reflexion = config.get("reflexion")
+    if not isinstance(reflexion, dict):
+        raise KeyError(f"No 'reflexion' section in '{prompts_path}'.")
+
+    feedback = _require_string(
+        reflexion, "feedback_template", "reflexion.feedback_template", prompts_path
+    )
+    hints = reflexion.get("error_hints")
+    if not isinstance(hints, dict) or not hints:
         raise KeyError(
-            f"'{self.source_path}' 中缺少 '{full_path}'，或该值为空。"
-            "所有提示词必须来自配置文件。"
+            f"Missing or empty 'reflexion.error_hints' in '{prompts_path}'."
         )
+    if "default" not in hints:
+        raise KeyError(
+            f"'default' error hint missing from '{prompts_path}'. "
+            "A fallback hint with key 'default' is required."
+        )
+
+    hints_clean = {
+        str(key): str(value).strip()
+        for key, value in hints.items()
+        if isinstance(value, str) and value.strip()
+    }
+    missing = set(hints) - set(hints_clean)
+    if missing:
+        raise KeyError(
+            f"Empty error hints in '{prompts_path}' for keys: {sorted(missing)}"
+        )
+
+    extraction = load_extraction_prompts(prompts_path)
+    logger.info(
+        "Loaded reflexion config from '%s' (%d error hints)",
+        prompts_path,
+        len(hints_clean),
+    )
+    return feedback, extraction["system"], hints_clean

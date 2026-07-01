@@ -1,8 +1,8 @@
 """
-Marker configuration: YAML loading and marker section parsing.
+标记词配置：YAML 加载与标记节解析。
 
-Loads the condition marker taxonomy from constraints YAML.
-No hardcoded fallback — a missing or malformed config is an error.
+从约束 YAML 加载条件标记词分类体系。
+无硬编码回退 —— 缺失或格式错误的配置视为错误。
 """
 
 from __future__ import annotations
@@ -19,21 +19,20 @@ logger = get_logger(__name__)
 
 
 def _load_markers(self, constraints_path: str) -> None:
-    """Load condition marker taxonomy from YAML config.
+    """从 YAML 配置加载条件标记词分类体系。
 
-    Parses the condition_markers section of constraints.yaml.
-    Each category (trigger, temporal, exception) has ``mark_words`` lists.
+    解析 constraints.yaml 的 condition_markers 节。
+    各类别（trigger、temporal、exception）含 ``mark_words`` 列表。
 
-    All markers are lowercased and indexed in a flat dict for
-    O(1) lookup during extraction.
+    所有标记词小写并索引到扁平字典，供提取时 O(1) 查找。
 
-    Args:
-        constraints_path: Path to the YAML config file.
+    参数：
+        constraints_path: YAML 配置文件路径。
 
-    Raises:
-        FileNotFoundError: If the config file does not exist.
-        yaml.YAMLError: If the YAML is malformed.
-        KeyError: If ``condition_markers`` is missing or empty.
+    抛出：
+        FileNotFoundError: 配置文件不存在时。
+        yaml.YAMLError: YAML 格式错误时。
+        KeyError: 缺少或为空 ``condition_markers`` 时。
     """
     config_path = Path(constraints_path)
     if not config_path.is_absolute():
@@ -85,16 +84,16 @@ def _load_markers(self, constraints_path: str) -> None:
 
 
 def _parse_markers_section(section: dict) -> Dict[str, ConditionType]:
-    """Parse a condition_markers YAML section into a lookup dict.
+    """将 condition_markers YAML 节解析为查找字典。
 
-    Args:
-        section: The condition_markers dict from YAML.
+    参数：
+        section: YAML 中的 condition_markers 字典。
 
-    Returns:
-        Dict mapping lowercase marker text -> ConditionType.
+    返回：
+        小写标记文本 -> ConditionType 的字典。
 
-    Raises:
-        KeyError: If a required category is missing.
+    抛出：
+        KeyError: 缺少必需类别时。
     """
     result: Dict[str, ConditionType] = {}
 

@@ -1,10 +1,10 @@
 """
-Evaluation orchestrator: dual-track evaluation across all experiments.
+评估编排器：全部实验的双轨评估。
 
-Orchestrates three evaluation tracks:
-  - Track 1: Task metrics (weighted triplet F1)
-  - Track 2: Linguistic metrics (dependency legality, passive recovery, etc.)
-  - Track 3: Significance testing (paired bootstrap, Wilcoxon, stratified)
+编排三条评估轨道：
+  - 轨道 1：任务指标（加权三元组 F1）
+  - 轨道 2：语言学指标（依存合法性、被动恢复等）
+  - 轨道 3：显著性检验（配对 bootstrap、Wilcoxon、分层）
 """
 
 from __future__ import annotations
@@ -50,41 +50,47 @@ def run_evaluation(
     testset_path: str,
     output_dir: str,
     config_path: str = "configs/model.yaml",
+    constraints_path: str = "configs/constraints.yaml",
 ) -> None:
-    """Orchestrate the dual-track evaluation across all experiments.
+    """编排全部实验的双轨评估。
 
-    This function performs all three evaluation tracks and saves results
-    to the ``output_dir/metrics/`` directory.
+    执行三条评估轨道，并将结果保存到 ``output_dir/metrics/``。
 
-    Args:
-        predictions_dir:  Directory containing ``baseline.jsonl``, etc.
-        gold_path:        Path to gold triplets JSONL.
-        testset_path:     Path to the test set (for UD parsing).
-        output_dir:       Base output directory.
-        config_path:      Model config for Stanza initialization.
+    参数:
+        predictions_dir:  含 ``baseline.jsonl``、``ours_dep.jsonl``、
+            ``ours_reflexion.jsonl`` 的预测结果目录。
+        gold_path:        金标三元组 JSONL 路径。
+        testset_path:     测试集 JSONL 路径（含 ``text`` 字段，用于 UD 解析）。
+        output_dir:       评估结果输出根目录；指标写入 ``output_dir/metrics/``。
+        config_path:      ``model.yaml`` 路径，用于初始化 Stanza 流水线。
+        constraints_path: ``constraints.yaml`` 路径，用于 F1 权重与当事方别名。
+
+    返回:
+        无（``None``）。结果以 JSON/CSV 文件写入 ``output_dir/metrics/``，
+        并在日志中打印跨实验对比表。
     """
     pred_dir = Path(predictions_dir)
 
-    # --- Load prediction files ---
+    # --- 加载预测文件 ---
     logger.info("Loading predictions...")
     baseline_preds = load_predictions(str(pred_dir / "baseline.jsonl"))
     ours_dep_preds = load_predictions(str(pred_dir / "ours_dep.jsonl"))
     ours_reflex_preds = load_predictions(str(pred_dir / "ours_reflexion.jsonl"))
 
-    # --- Load gold triplets ---
+    # --- 加载金标三元组 ---
     gold_triplets = load_gold_triplets(gold_path)
 
-    # --- Load test set (for parsing trees) ---
+    # --- 加载测试集（用于解析树） ---
     testset = read_jsonl(testset_path) if Path(testset_path).exists() else []
 
-    # --- Parse UD trees for the test set (needed for linguistic metrics) ---
+    # --- 为测试集解析 UD 树（语言学指标所需） ---
     trees: List[DependencyTree] = []
     if testset:
         logger.info(
             "Parsing UD trees for %d test clauses (this may take a moment)...",
             len(testset),
         )
-        # Initialize Stanza.
+        # 初始化 Stanza。
         stanza_cfg = _load_stanza_config(config_path)
         nlp_parser = StanzaParser(
             lang=stanza_cfg.get("lang", "en"),
@@ -100,30 +106,31 @@ def run_evaluation(
                     trees.append(tree)
                 except Exception as exc:
                     logger.debug("Parse failed for clause: %s", exc)
-                    trees.append(DependencyTree(text=text, tokens=[]))  # Empty tree
+                    trees.append(DependencyTree(text=text, tokens=[]))  # 空树
             else:
                 trees.append(DependencyTree(text="", tokens=[]))
 
-    # --- Map experiment names to their prediction data ---
+    # --- 实验名与预测数据映射 ---
     experiments: Dict[str, List[Dict]] = {
         "baseline": baseline_preds,
         "ours_dep": ours_dep_preds,
         "ours_reflexion": ours_reflex_preds,
     }
 
-    # --- Convert prediction triplets ---
+    # --- 转换预测三元组 ---
     exp_triplets: Dict[str, List[LegalTriplet]] = {}
     for name, preds in experiments.items():
         exp_triplets[name] = load_predictions_as_triplets(preds)
 
-    # --- Track 1: Task Metrics (Triplet F1) ---
+    # --- 轨道 1：任务指标（三元组 F1） ---
     task_metrics: Dict[str, Dict] = {}
     per_sample_scores: Dict[str, List[float]] = {}
 
     has_gold = len(gold_triplets) > 0
     if has_gold:
         logger.info("Computing task metrics (weighted triplet F1)...")
-        party_aliases = load_party_aliases("configs/constraints.yaml")
+        party_aliases = load_party_aliases(constraints_path)
+        f1_weights_path = constraints_path
         for name, triplets in exp_triplets.items():
             if not triplets:
                 logger.warning("No predictions for %s -- skipping task metrics", name)
@@ -131,7 +138,7 @@ def run_evaluation(
                 per_sample_scores[name] = []
                 continue
 
-            # Ensure length matches gold.
+            # 确保与金标等长。
             n = min(len(triplets), len(gold_triplets))
             if len(triplets) != len(gold_triplets):
                 logger.warning(
@@ -143,14 +150,16 @@ def run_evaluation(
                 predictions=triplets[:n],
                 gold=gold_triplets[:n],
                 party_aliases=party_aliases,
+                constraints_path=f1_weights_path,
             )
             task_metrics[name] = f1_metrics
 
-            # Per-sample F1 for significance testing.
+            # 逐样本 F1，供显著性检验。
             ps_scores = compute_per_sample_f1(
                 predictions=triplets[:n],
                 gold=gold_triplets[:n],
                 party_aliases=party_aliases,
+                constraints_path=constraints_path,
             )
             per_sample_scores[name] = ps_scores
     else:
@@ -161,7 +170,7 @@ def run_evaluation(
             task_metrics[name] = {}
             per_sample_scores[name] = []
 
-    # --- Track 2: Linguistic Metrics ---
+    # --- 轨道 2：语言学指标 ---
     linguistic_metrics: Dict[str, Dict] = {}
     if trees and has_gold and len(trees) == len(gold_triplets):
         logger.info("Computing linguistic metrics...")
@@ -174,7 +183,7 @@ def run_evaluation(
 
             n = min(len(triplets), len(gold_triplets), len(trees))
 
-            # Load validation results for correction rate (ours_dep/ours_reflex).
+            # 加载验证结果以计算修正率（ours_dep/ours_reflex）。
             val_results: Optional[List[ValidationResult]] = None
             if name in ("ours_dep", "ours_reflexion"):
                 val_path = pred_dir / f"{name}_validations.jsonl"
@@ -207,14 +216,14 @@ def run_evaluation(
         for name in experiments:
             linguistic_metrics[name] = {}
 
-    # --- Track 3: Significance Testing ---
+    # --- 轨道 3：显著性检验 ---
     significance_results: Dict[str, Any] = {}
     if len(per_sample_scores) >= 2 and all(
         len(scores) > 0 for scores in per_sample_scores.values()
     ):
         logger.info("Running significance tests...")
 
-        # Pairwise comparisons.
+        # 成对比较。
         try:
             sig = run_all_comparisons(
                 experiment_results={
@@ -228,12 +237,12 @@ def run_evaluation(
             logger.error("Significance testing failed: %s", exc)
             significance_results = {"error": str(exc)}
 
-        # Stratified significance by phenomenon (if testset has phenomenon labels).
+        # 按现象分层显著性（若测试集含现象标签）。
         if testset and all("phenomena" in c for c in testset):
             stratified_results: Dict[str, Any] = {}
             phen_names = ["passive", "conditional", "relative_clause",
                           "long_distance", "negation"]
-            # Only compare baseline vs ours_reflexion for brevity.
+            # 为简洁仅比较 baseline vs ours_reflexion。
             if ("baseline" in per_sample_scores
                     and "ours_reflexion" in per_sample_scores
                     and len(per_sample_scores["baseline"]) == len(testset)):
@@ -263,22 +272,22 @@ def run_evaluation(
             "Insufficient per-sample scores for significance testing."
         )
 
-    # --- Save all results ---
+    # --- 保存全部结果 ---
     metrics_dir = Path(output_dir) / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save task metrics.
+    # 保存任务指标。
     write_json(str(metrics_dir / "task_metrics.json"), task_metrics)
 
-    # Save linguistic metrics.
+    # 保存语言学指标。
     write_json(str(metrics_dir / "linguistic_metrics.json"), linguistic_metrics)
 
-    # Save significance results.
+    # 保存显著性结果。
     write_json(str(metrics_dir / "significance.json"), significance_results)
 
-    # Write summary CSV.
+    # 写入摘要 CSV。
     _write_summary_csv(task_metrics, linguistic_metrics, significance_results,
                        str(metrics_dir / "summary.csv"))
 
-    # --- Print comprehensive comparison table ---
+    # --- 打印综合比较表 ---
     _print_comparison_table(task_metrics, linguistic_metrics, significance_results)

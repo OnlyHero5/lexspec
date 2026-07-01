@@ -33,7 +33,7 @@ logger = get_logger(__name__)
 
 
 # =============================================================================
-# Client Configuration
+# 客户端配置
 # =============================================================================
 
 
@@ -41,40 +41,48 @@ logger = get_logger(__name__)
 class ClientConfig:
     """大语言模型客户端配置 —— 封装 llama.cpp 服务器的连接与生成参数。
 
-    所有生成参数固定以保证确定性、可复现的输出。每个字段均注明其在
-    推理流水线中的作用。
+    字段:
+        base_url: llama.cpp OpenAI 兼容 API 根地址（如 ``http://host:8080/v1``）。
+        api_key: API 密钥占位符；llama.cpp 不校验，但 SDK 要求非空。
+        model: 服务端模型名（``--model`` 参数对应值）。
+        temperature: 采样温度；``0.0`` 为贪心解码，保证可复现。
+        max_tokens: 单次生成的最大 token 数。
+        seed: 随机种子，与 ``temperature=0`` 配合保证确定性。
+        timeout: 单次 HTTP 请求超时秒数。
+        max_retries: 瞬时故障时的最大重试次数。
+        response_format: 默认结构化输出格式（通常为 ``json_object``）。
+        extra_body: 传给服务端的额外 JSON 字段（提供商扩展用）。
 
-    默认值与 LexSpec configs/model.yaml 中 server 和 generation 段一致。
-    可通过关键字参数覆盖以进行临时实验或标注模型切换。
+    默认值与 ``configs/model.yaml`` 中 ``server``、``generation`` 段一致。
     """
 
-    # --- Connection ---
+    # --- 连接 ---
     base_url: str = "http://localhost:8080/v1"
     api_key: str = "not-needed"
 
-    # --- Model ---
+    # --- 模型 ---
     model: str = "qwen3.5-9b"
 
-    # --- Generation (reproducibility-critical) ---
+    # --- 生成参数（可复现性关键）---
     temperature: float = 0.0
     max_tokens: int = 512
     seed: int = 42
 
-    # --- Reliability ---
+    # --- 可靠性 ---
     timeout: int = 60
     max_retries: int = 3
 
-    # --- Structured output ---
+    # --- 结构化输出 ---
     response_format: Optional[Dict[str, str]] = field(
         default_factory=lambda: {"type": "json_object"}
     )
 
-    # --- Extension point for provider-specific options ---
+    # --- 提供商特定选项的扩展点 ---
     extra_body: Optional[Dict[str, Any]] = field(default=None)
 
 
 # =============================================================================
-# LLM Client
+# 大语言模型客户端
 # =============================================================================
 
 
@@ -92,31 +100,27 @@ class LLMClient:
     """
 
     def __init__(self, config: ClientConfig):
-        """Initialize the OpenAI client pointing at the llama.cpp endpoint.
+        """初始化指向 llama.cpp 端点的 OpenAI 客户端。
 
-        Creates an ``openai.OpenAI`` instance with the configured base URL
-        and API key, then stores a copy of the config for reuse in each
-        completion call.
+        使用配置的 base URL 与 API 密钥创建 ``openai.OpenAI`` 实例，
+        并保存配置副本供每次补全调用复用。
 
-        Args:
-            config:  ``ClientConfig`` with endpoint, model identity, and all
-                     generation parameters.
+        参数:
+            config:  包含端点、模型标识及全部生成参数的 ``ClientConfig``。
         """
-        # --- Store configuration for reuse in complete() calls ---
-        # We keep a reference so that generate-time parameters (temperature,
-        # max_tokens, seed, etc.) are always drawn from the config that was
-        # passed at construction time.
+        # --- 保存配置供 complete() 调用复用 ---
+        # 保留引用，使生成时参数（temperature、max_tokens、seed 等）
+        # 始终来自构造时传入的配置。
         self.config = config
 
-        # --- Create the OpenAI SDK client ---
-        # The SDK is pointed at llama.cpp's /v1 endpoint.  The api_key value
-        # is arbitrary — llama.cpp ignores it, but the SDK requires a non-empty
-        # string to avoid a validation error.
+        # --- 创建 OpenAI SDK 客户端 ---
+        # SDK 指向 llama.cpp 的 /v1 端点。api_key 值可任意填写——
+        # llama.cpp 会忽略，但 SDK 要求非空字符串以避免校验错误。
         self.client = OpenAI(
             base_url=self.config.base_url,
             api_key=self.config.api_key,
             timeout=self.config.timeout,
-            max_retries=0,  # We handle retries ourselves for backoff control
+            max_retries=0,  # 自行处理重试以控制退避策略
         )
 
         logger.info(
@@ -132,35 +136,30 @@ class LLMClient:
         )
 
     # -------------------------------------------------------------------------
-    # Public API
+    # 公开 API
     # -------------------------------------------------------------------------
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
-        """Send a chat completion request and return the response text.
+        """发送聊天补全请求并返回响应文本。
 
-        Builds a two-message conversation (system + user), calls the
-        chat completions endpoint with parameters from ``ClientConfig``,
-        and returns the model's text response.
+        构建双消息对话（系统 + 用户），使用 ``ClientConfig`` 中的参数
+        调用聊天补全端点，并返回模型的文本响应。
 
-        On transient errors (connection refused, 5xx, rate limit) the
-        request is retried with exponential backoff.  After
-        ``max_retries`` failures a ``RuntimeError`` is raised.
+        对瞬时错误（连接拒绝、5xx、速率限制）采用指数退避重试。
+        在 ``max_retries`` 次失败后抛出 ``RuntimeError``。
 
-        Args:
-            system_prompt:  System message defining the model's role
-                            and task instructions.
-            user_prompt:    User message carrying the actual task input
-                            (e.g., the clause text to extract from).
+        参数:
+            system_prompt:  定义模型角色与任务指令的系统消息。
+            user_prompt:    承载实际任务输入的用户消息
+                            （例如待抽取的条款文本）。
 
-        Returns:
-            The text content of the first choice from the model's response.
-            With ``temperature=0.0`` this is the single highest-probability
-            generation.
+        返回:
+            模型响应中第一个选项的文本内容。
+            在 ``temperature=0.0`` 时为概率最高的单一生成结果。
 
-        Raises:
-            RuntimeError:  If all retry attempts are exhausted.  The
-                           original exception chain is preserved via
-                           ``raise ... from last_exception``.
+        异常:
+            RuntimeError:  所有重试尝试耗尽时抛出，原始异常链通过
+                           ``raise ... from last_exception`` 保留。
         """
         messages = [
             {"role": "system", "content": system_prompt},
@@ -179,43 +178,39 @@ class LLMClient:
         user_prompt: str,
         json_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Send a request with structured JSON output constraints.
+        """发送带结构化 JSON 输出约束的请求。
 
-        Like ``complete()`` but adds ``response_format`` to the API call
-        so the model is steered toward producing valid JSON.
+        与 ``complete()`` 类似，但向 API 调用添加 ``response_format``，
+        引导模型生成有效 JSON。
 
-        Two modes are supported:
+        支持两种模式：
 
-        1. **json_object mode** (default): Uses ``response_format={"type":
-           "json_object"}``.  The model is instructed to output valid JSON
-           but no schema is enforced at the API level.  This is the most
-           broadly compatible option.
+        1. **json_object 模式**（默认）：使用 ``response_format={"type":
+           "json_object"}``。模型被指示输出有效 JSON，但 API 层不强制模式。
+           兼容性最广。
 
-        2. **json_schema mode**: When ``json_schema`` is provided, it is
-           passed as ``response_format={"type": "json_schema", "json_schema":
-           {...}}``.  This tells the API to constrain generation to match
-           the given JSON Schema.  Requires server-side support (available
-           in newer llama.cpp builds with grammar-based sampling).
+        2. **json_schema 模式**：提供 ``json_schema`` 时，传递
+           ``response_format={"type": "json_schema", "json_schema": {...}}``。
+           告知 API 将生成约束为符合给定 JSON Schema。需要服务端支持
+           （新版 llama.cpp 支持基于语法的采样）。
 
-        Args:
-            system_prompt:  System message with role and instructions.
-            user_prompt:    User message with the task input.
-            json_schema:    Optional JSON Schema dict for strict mode.
-                            When provided, must contain ``name`` and
-                            ``schema`` keys per the OpenAI structured
-                            output specification.
+        参数:
+            system_prompt:  含角色与指令的系统消息。
+            user_prompt:    含任务输入的用户消息。
+            json_schema:    严格模式的可选 JSON Schema 字典。
+                            提供时需包含 OpenAI 结构化输出规范要求的
+                            ``name`` 与 ``schema`` 键。
 
-        Returns:
-            JSON string from the model's response.
+        返回:
+            模型响应中的 JSON 字符串。
 
-        Raises:
-            RuntimeError:  If all retry attempts are exhausted.
+        异常:
+            RuntimeError:  所有重试尝试耗尽时抛出。
         """
-        # --- Build response_format based on whether a schema is provided ---
+        # --- 根据是否提供 schema 构建 response_format ---
         if json_schema is not None:
-            # Use the JSON Schema mode for stricter generation constraints.
-            # The schema dict should contain 'name' (a short identifier) and
-            # 'schema' (the actual JSON Schema object).
+            # 使用 JSON Schema 模式以获得更严格的生成约束。
+            # schema 字典应包含 'name'（短标识符）与 'schema'（实际 JSON Schema 对象）。
             response_format = {
                 "type": "json_schema",
                 "json_schema": json_schema,
@@ -225,8 +220,8 @@ class LLMClient:
                 json_schema.get("name", "unnamed"),
             )
         else:
-            # Fall back to basic json_object mode — the model is asked to
-            # output JSON but no grammar-level enforcement is applied.
+            # 回退到基本 json_object 模式——要求模型输出 JSON，
+            # 但不进行语法级强制。
             response_format = self.config.response_format
             logger.debug("Using json_object mode (no schema enforcement)")
 

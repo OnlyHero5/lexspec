@@ -44,13 +44,13 @@ logger = get_logger(__name__)
 def 加载模型配置(config_path: str = "configs/model.yaml") -> Dict[str, Any]:
     """加载 model.yaml 配置文件。
 
-    Args:
+    参数:
         config_path: 配置文件路径。
 
-    Returns:
+    返回:
         配置字典。
 
-    Raises:
+    异常:
         FileNotFoundError: 文件不存在。
         yaml.YAMLError: YAML 解析失败。
     """
@@ -79,14 +79,14 @@ def 构建实验客户端(
 
     读取 ``server``、``models.experiment`` 和 ``generation`` 段。
 
-    Args:
+    参数:
         config: 已加载的配置字典（必须由 加载模型配置 返回）。
         config_path: 配置文件路径（仅用于错误消息）。
 
-    Returns:
+    返回:
         配置就绪的 LLMClient 实例。
 
-    Raises:
+    异常:
         KeyError: 缺少必需的配置键。
     """
     server = config.get("server", {})
@@ -129,15 +129,15 @@ def 构建标注客户端(
 ) -> LLMClient:
     """从配置字典构建标注模型的 LLM 客户端。
 
-    Args:
+    参数:
         config: 已加载的配置字典。
         model_role: 标注模型角色 —— "primary" 或 "secondary"。
         config_path: 配置文件路径（仅用于错误消息）。
 
-    Returns:
+    返回:
         配置就绪的 LLMClient 实例。
 
-    Raises:
+    异常:
         ValueError: model_role 无效。
         KeyError: 缺少必需的配置键。
     """
@@ -190,11 +190,11 @@ def 构建Stanza解析器(
 ) -> StanzaParser:
     """从配置字典构建 Stanza 依存句法解析器。
 
-    Args:
+    参数:
         config: 已加载的配置字典。
         config_path: 配置文件路径（仅用于错误消息）。
 
-    Returns:
+    返回:
         初始化完成的 StanzaParser 实例。
     """
     stanza_cfg = config.get("stanza", {})
@@ -224,11 +224,11 @@ def 获取Reflexion参数(
 ) -> Dict[str, Any]:
     """从配置字典读取 Reflexion 自我修正参数。
 
-    Args:
+    参数:
         config: 已加载的配置字典。
         config_path: 配置文件路径（仅用于错误消息）。
 
-    Returns:
+    返回:
         包含 ``max_iterations`` 和 ``temperature`` 的字典。
     """
     reflexion_cfg = config.get("reflexion", {})
@@ -244,25 +244,18 @@ def 获取Reflexion参数(
 
 
 def 加载约束配置(config_path: str = "configs/constraints.yaml") -> Dict[str, Any]:
-    """加载 constraints.yaml 配置文件。
+    """加载 ``constraints.yaml`` 并返回完整配置字典。
 
-    Args:
+    参数:
         config_path: 约束配置文件路径。
 
-    Returns:
-        约束配置字典。
+    返回:
+        含 F1 权重、校验阈值、规范化规则、现象配额等全部配置节的字典。
 
-    Raises:
-        FileNotFoundError: 文件不存在。
-        yaml.YAMLError: YAML 解析失败。
+    异常:
+        FileNotFoundError: 配置文件不存在。
+        ValueError: 文件为空。
     """
-    path = Path(config_path)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"约束配置文件未找到: '{config_path}'。请确认 configs/constraints.yaml 存在。"
-        )
-    with open(path, "r", encoding="utf-8") as fh:
-        config = yaml.safe_load(fh)
-    if config is None:
-        raise ValueError(f"约束配置文件 '{config_path}' 为空。")
-    return config
+    from src.utils.constraints import load_constraints_config
+
+    return load_constraints_config(config_path)

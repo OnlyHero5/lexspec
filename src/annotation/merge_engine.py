@@ -1,9 +1,8 @@
 """
-Merge engine for the annotation pipeline.
+标注流水线的合并引擎。
 
-Reconciles dual-model annotations using field-level consensus voting,
-augmented by cross-model review results to automatically resolve
-disagreements where possible.
+通过字段级共识投票调和双模型标注，
+并结合跨模型审查结果在可能时自动解决分歧。
 """
 
 from __future__ import annotations
@@ -27,12 +26,12 @@ logger = get_logger(__name__)
 
 
 def _index_by_id(records: List[dict]) -> Dict[str, dict]:
-    """Index a list of records by clause_id."""
+    """按 clause_id 为记录列表建立索引。"""
     return {r["clause_id"]: r for r in records if r.get("clause_id")}
 
 
 def _field_value(t: LegalTriplet, field_name: str) -> str:
-    """Extract the string value of a named field from a LegalTriplet."""
+    """从 LegalTriplet 提取命名字段的字符串值。"""
     mapping = {
         "subject.text": t.subject.text,
         "subject.role": t.subject.role.value,
@@ -45,7 +44,7 @@ def _field_value(t: LegalTriplet, field_name: str) -> str:
 
 
 def _set_field(t: LegalTriplet, field_name: str, value: str) -> None:
-    """Set a named field on a LegalTriplet."""
+    """在 LegalTriplet 上设置命名字段。"""
     from src.extraction.schema import LegalRole, ConditionType
     if field_name == "subject.text":
         t.subject.text = value
@@ -67,20 +66,20 @@ def _resolve_with_reviews(
     review_records: List[dict],
     reviewer_annotations: Dict[str, LegalTriplet],
 ) -> tuple[LegalTriplet, List[dict]]:
-    """Use cross-review results to automatically resolve annotation disagreements.
+    """利用跨审查结果自动解决标注分歧。
 
-    For each disagreement, try in order:
-      1. If the reviewer rejected the field, adopt the reviewer's correction.
-      2. If the reviewer's own annotation agrees with one side, adopt that side's value.
+    对每个分歧按顺序尝试：
+      1. 若审查者拒绝该字段，采用审查者的修正。
+      2. 若审查者自己的标注与一方一致，采用该方取值。
 
-    Args:
-        consensus:            Current consensus triplet (may be modified).
-        disagreements:        List of field-level disagreements.
-        review_records:       List of review records.
-        reviewer_annotations: Reviewer's own independent annotations (clause_id -> LegalTriplet).
+    参数：
+        consensus:            当前共识三元组（可能被修改）。
+        disagreements:        字段级分歧列表。
+        review_records:       审查记录列表。
+        reviewer_annotations:   审查者独立标注（clause_id -> LegalTriplet）。
 
-    Returns:
-        (updated consensus triplet, still-unresolved disagreements list).
+    返回：
+        （更新后的共识三元组，仍未解决的分歧列表）。
     """
     by_id = _index_by_id(review_records)
     resolved_notes: List[dict] = []
@@ -92,7 +91,7 @@ def _resolve_with_reviews(
         clause_id = dis.get("clause_id", "")
         resolved = False
 
-        # Strategy 1: Reviewer explicitly rejected the field -> adopt correction.
+        # 策略 1：审查者明确拒绝该字段 → 采用修正值。
         rev = by_id.get(clause_id)
         if rev and rev.get("success") and rev.get("corrected_triplet"):
             corrected = dict_to_triplet(rev["corrected_triplet"])
@@ -115,7 +114,7 @@ def _resolve_with_reviews(
                     "clause_id": clause_id, "field": field, "via": "review correction"
                 })
 
-        # Strategy 2: Reviewer's own annotation agrees with one side -> adopt it.
+        # 策略 2：审查者自己的标注与一方一致 → 采用该方取值。
         if not resolved and clause_id in reviewer_annotations:
             own = reviewer_annotations[clause_id]
             a_norm = normalize_text(dis["anno_a_value"])
@@ -161,13 +160,13 @@ def _resolve_with_reviews(
 
 
 def cmd_merge(args) -> None:
-    """Merge dual-model annotations and cross-review results into gold standard.
+    """将双模型标注与跨审查结果合并为金标准。
 
-    Process:
-      1. For each shared clause, field-level voting produces preliminary consensus.
-      2. Cross-review results are used to automatically resolve disagreements.
-      3. Unresolved disagreements are marked as needs_human_review.
-      4. Output gold file and human-review file.
+    流程：
+      1. 对每条共有条款，字段级投票产生初步共识。
+      2. 用跨审查结果自动解决分歧。
+      3. 未解决分歧标记为 needs_human_review。
+      4. 输出金标准文件与人工审查文件。
     """
     qwen_path = Path(args.qwen or QWEN_ANNOT)
     gemma_path = Path(args.gemma or GEMMA_ANNOT)
@@ -176,7 +175,7 @@ def cmd_merge(args) -> None:
     gold_path = Path(args.output or GOLD_OUT)
     disagree_path = Path(args.disagreements or DISAGREE_OUT)
 
-    # Pre-check: both annotation files must exist.
+    # 预检：两份标注文件均须存在。
     if not qwen_path.exists() or not gemma_path.exists():
         logger.error("Both Qwen and Gemma annotation files are required.")
         logger.error(
@@ -189,20 +188,20 @@ def cmd_merge(args) -> None:
         )
         sys.exit(1)
 
-    # Load all data.
+    # 加载全部数据。
     qwen_recs = _index_by_id(read_jsonl(str(qwen_path)))
     gemma_recs = _index_by_id(read_jsonl(str(gemma_path)))
     qwen_rev = read_jsonl(str(qwen_rev_path)) if qwen_rev_path.exists() else []
     gemma_rev = read_jsonl(str(gemma_rev_path)) if gemma_rev_path.exists() else []
 
-    # Only process clauses annotated by both models.
+    # 仅处理两模型均标注的条款。
     common_ids = sorted(set(qwen_recs) & set(gemma_recs))
     logger.info("Merging %d clauses annotated by both models", len(common_ids))
 
     gold_records: List[dict] = []
     human_review: List[dict] = []
 
-    # Build reviewer own-annotation indices (for auto-resolution).
+    # 构建审查者独立标注索引（用于自动解决）。
     qwen_own = {
         cid: dict_to_triplet(r["triplet"])
         for cid, r in qwen_recs.items()
@@ -218,7 +217,7 @@ def cmd_merge(args) -> None:
         qr = qwen_recs[cid]
         gr = gemma_recs[cid]
 
-        # Either side failed -> mark for human review.
+        # 任一方失败 → 标记需人工审查。
         if not qr.get("success") or not gr.get("success"):
             human_review.append({"clause_id": cid, "reason": "annotation failed"})
             continue
@@ -226,17 +225,17 @@ def cmd_merge(args) -> None:
         q_tri = dict_to_triplet(qr["triplet"])
         g_tri = dict_to_triplet(gr["triplet"])
 
-        # Step 1: Field-level consensus.
+        # 步骤 1：字段级共识。
         consensus, disagreements = field_level_consensus(q_tri, g_tri)
         for d in disagreements:
             d["clause_id"] = cid
 
-        # Step 2: Auto-resolve using cross-reviews.
-        # Qwen reviews Gemma -> can resolve fields where Gemma was wrong.
+        # 步骤 2：用跨审查自动解决。
+        # Qwen 审查 Gemma → 可解决 Gemma 有误的字段。
         consensus, remaining = _resolve_with_reviews(
             consensus, disagreements, qwen_rev, qwen_own,
         )
-        # Gemma reviews Qwen -> can resolve fields where Qwen was wrong.
+        # Gemma 审查 Qwen → 可解决 Qwen 有误的字段。
         consensus, remaining = _resolve_with_reviews(
             consensus, remaining, gemma_rev, gemma_own,
         )
@@ -258,7 +257,7 @@ def cmd_merge(args) -> None:
                 "disagreements": remaining,
             })
 
-    # Write outputs.
+    # 写出输出。
     ensure_dir(gold_path.parent)
     write_jsonl(str(gold_path), gold_records)
     write_jsonl(str(disagree_path), human_review)

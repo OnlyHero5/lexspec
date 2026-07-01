@@ -19,44 +19,38 @@ logger = get_logger(__name__)
 
 
 def parse_llm_response(response: str) -> Dict[str, Any]:
-    """Parse the LLM JSON response with robust error handling.
+    """以鲁棒错误处理解析大语言模型 JSON 响应。
 
-    The LLM may produce output that is not strictly valid JSON —
-    extra text before/after the JSON block, truncated output,
-    markdown code fences, trailing commas, etc.  This method
-    attempts multiple strategies in order of reliability:
+    大语言模型输出可能并非严格有效 JSON——JSON 块前后有多余文本、
+    输出截断、Markdown 代码围栏、尾随逗号等。本方法按可靠性顺序
+    尝试多种策略：
 
-    1. **Direct parse** — ``json.loads`` on the raw response.  Works
-       when the model produces clean JSON.
+    1. **直接解析** —— 对原始响应执行 ``json.loads``。模型输出干净 JSON 时有效。
 
-    2. **Regex extraction** — Search for a ``{...}`` block in the
-       response using a greedy brace matcher.  Handles cases where
-       the model wraps JSON in explanatory text or markdown fences.
+    2. **正则提取** —— 用贪婪花括号匹配器在响应中搜索 ``{...}`` 块。
+       处理模型将 JSON 包裹在说明文字或 Markdown 围栏中的情况。
 
-    3. **Empty dict** — Return an empty dict on complete failure.
-       The caller (``extract()``) detects this and builds a fallback
-       triplet.
+    3. **空字典** —— 完全失败时返回空字典。
+       调用方（``extract()``）检测此情况并构建回退三元组。
 
-    Args:
-        response:  Raw text response from the LLM.
+    参数:
+        response:  大语言模型的原始文本响应。
 
-    Returns:
-        Parsed dict (may be empty on complete failure).  The caller
-        is responsible for validating the dict against the
-        ``LegalTriplet`` schema.
+    返回:
+        解析后的字典（完全失败时可能为空）。调用方负责对照
+        ``LegalTriplet`` 模式校验字典。
     """
     if not response or not response.strip():
         logger.warning("LLM returned empty response")
         return {}
 
-    # --- Strategy 1: Direct JSON parse ---
-    # Strip whitespace and try parsing the entire response as JSON.
+    # --- 策略 1：直接 JSON 解析 ---
+    # 修剪空白后尝试将整个响应解析为 JSON。
     cleaned = response.strip()
     try:
         result = json.loads(cleaned)
-        # The LLM may return a JSON array (as the prompts.yaml format
-        # requests).  If so, take the first element — the extractor
-        # operates on single triplets.
+        # 大语言模型可能返回 JSON 数组（prompts.yaml 格式所要求）。
+        # 若是数组则取第一个元素——抽取器处理单个三元组。
         if isinstance(result, list):
             if len(result) > 0:
                 logger.debug(
@@ -70,7 +64,7 @@ def parse_llm_response(response: str) -> Dict[str, Any]:
         if isinstance(result, dict):
             logger.debug("Direct JSON parse succeeded")
             return result
-        # If it's neither a dict nor a list, the output is unusable.
+        # 若既非字典也非列表，输出不可用。
         logger.warning(
             "Parsed JSON is not a dict or list (type=%s)",
             type(result).__name__,
@@ -79,13 +73,12 @@ def parse_llm_response(response: str) -> Dict[str, Any]:
     except (json.JSONDecodeError, ValueError) as exc:
         logger.debug("Direct JSON parse failed: %s — trying regex extraction", exc)
 
-    # --- Strategy 2: Regex extraction of {...} block ---
-    # The model sometimes wraps JSON in markdown code fences or
-    # prepends/appends explanatory text.  We use a greedy regex to
-    # find the outermost matched brace pair.
+    # --- 策略 2：正则提取 {...} 块 ---
+    # 模型有时将 JSON 包裹在 Markdown 代码围栏中，或在前后附加说明文字。
+    # 使用贪婪正则查找最外层匹配的花括号对。
     try:
-        # Find the first '{' and then track brace depth to find the
-        # matching '}'.  This handles nested objects within the JSON.
+        # 找到第一个 '{'，再追踪花括号深度以定位匹配的 '}'。
+        # 可处理 JSON 内的嵌套对象。
         result = _extract_json_object(cleaned)
         if result is not None:
             logger.debug("Regex JSON extraction succeeded")
@@ -93,10 +86,9 @@ def parse_llm_response(response: str) -> Dict[str, Any]:
     except (json.JSONDecodeError, ValueError) as exc:
         logger.debug("Regex JSON extraction failed: %s", exc)
 
-    # --- Strategy 3: Markdown code fence extraction ---
-    # Check for ```json ... ``` or ``` ... ``` blocks.  Some models
-    # (especially instruction-tuned ones) default to wrapping JSON
-    # in markdown fences even when told not to.
+    # --- 策略 3：Markdown 代码围栏提取 ---
+    # 检查 ```json ... ``` 或 ``` ... ``` 块。部分模型
+    # （尤其指令微调模型）即使被告知不要，仍默认用 Markdown 围栏包裹 JSON。
     try:
         fence_match = re.search(
             r"```(?:json)?\s*\n?(.*?)\n?```",
@@ -113,63 +105,59 @@ def parse_llm_response(response: str) -> Dict[str, Any]:
                     logger.debug("JSON extracted from markdown code fence")
                     return result
             except (json.JSONDecodeError, ValueError):
-                pass  # Fall through to Strategy 4
+                pass  # 继续策略 4
     except Exception:
-        pass  # Safety net — regex shouldn't raise but be defensive
+        pass  # 安全网——正则不应抛出，但保持防御性
 
-    # --- Strategy 4: Complete failure ---
+    # --- 策略 4：完全失败 ---
     logger.warning("All JSON parsing strategies failed for response")
     return {}
 
 
 def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
-    """Extract a valid JSON object ``{...}`` from text using brace matching.
+    """用花括号匹配从文本中提取有效 JSON 对象 ``{...}``。
 
-    Scans the text character by character, tracking brace depth, to
-    find the first complete, outermost ``{...}`` pair.  Returns the
-    parsed dict if successful, or ``None`` if no valid JSON object
-    could be extracted.
+    逐字符扫描文本并追踪花括号深度，定位第一个完整的最外层 ``{...}`` 对。
+    成功则返回解析后的字典，否则返回 ``None``。
 
-    This is more robust than a simple regex because it correctly
-    handles nested braces (e.g., JSON strings containing escaped
-    braces, or nested objects).
+    比简单正则更鲁棒，可正确处理嵌套花括号
+    （如 JSON 字符串中的转义花括号或嵌套对象）。
 
-    Args:
-        text:  Text that may contain a JSON object somewhere within it.
+    参数:
+        text:  可能内含 JSON 对象的文本。
 
-    Returns:
-        Parsed dict, or None if extraction fails.
+    返回:
+        解析后的字典，提取失败则返回 None。
     """
-    # Find the opening brace.
+    # 查找开括号。
     start_idx = text.find("{")
     if start_idx == -1:
         return None
 
-    # Track brace depth.  Start at 1 because we found the first '{'.
+    # 追踪花括号深度。从 1 开始，因已找到第一个 '{'。
     depth = 0
     in_string = False
     escape_next = False
 
     for i, ch in enumerate(text[start_idx:], start=start_idx):
         if escape_next:
-            # The previous character was a backslash — this character
-            # is escaped and should not be interpreted as a structural
-            # character (e.g., \" inside a JSON string).
+            # 前一字符为反斜杠——当前字符被转义，
+            # 不应解释为结构字符（如 JSON 字符串内的 \"）。
             escape_next = False
             continue
 
         if ch == "\\" and in_string:
-            # Backslash inside a string — the next character is escaped.
+            # 字符串内的反斜杠——下一字符被转义。
             escape_next = True
             continue
 
         if ch == '"' and not escape_next:
-            # Toggle string state.  Unescaped quotes delimit JSON strings.
+            # 切换字符串状态。未转义引号界定 JSON 字符串。
             in_string = not in_string
             continue
 
         if in_string:
-            # Inside a string — structural braces are not counted.
+            # 字符串内——结构花括号不计入深度。
             continue
 
         if ch == "{":
@@ -177,11 +165,10 @@ def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                # We found the matching closing brace.
+                # 找到匹配的闭括号。
                 json_str = text[start_idx:i + 1]
                 return json.loads(json_str)
 
-    # If we exit the loop without depth hitting 0, the braces are
-    # unbalanced — the JSON is malformed or truncated.
+    # 若循环结束而深度未归零，花括号不平衡——JSON 格式错误或截断。
     logger.debug("Brace extraction failed: unbalanced braces (depth=%d)", depth)
     return None

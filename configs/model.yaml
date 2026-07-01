@@ -1,147 +1,122 @@
 # =============================================================================
-# LexSpec: Model and Server Configuration
+# LexSpec：模型与服务配置
 # =============================================================================
 #
-# Purpose:
-#   This file defines the LLM server connection parameters, model identities,
-#   generation hyperparameters, Stanza NLP pipeline settings, and Reflexion
-#   correction parameters for the LexSpec legal-contract extraction system.
+# 用途：
+#   本文件定义 LexSpec 法律合同抽取系统的 LLM 服务连接参数、模型标识、
+#   生成超参数、Stanza NLP 流水线设置及 Reflexion 纠错参数。
 #
-# Architecture:
-#   All LLM inference runs through a single llama.cpp server instance deployed
-#   locally.  The server hosts multiple model files and exposes an OpenAI-
-#   compatible HTTP API at the base_url below.  Each model is referenced by
-#   its llama.cpp model name (the --model argument used when launching the
-#   server).
+# 架构：
+#   全部 LLM 推理经本地部署的单一 llama.cpp 服务实例运行。服务托管多个模型文件，
+#   并在下方 base_url 暴露 OpenAI 兼容 HTTP API。各模型以其 llama.cpp 模型名引用
+#   （启动服务时使用的 --model 参数）。
 #
-# Model isolation guarantees:
-#   - The experiment model (Qwen3.5 9B) performs the actual extraction task.
-#   - Annotation models (Qwen3.6 27B, Gemma4 31B) are used ONLY for gold-label
-#     generation and are completely isolated from the experiment pipeline.
-#     Their predictions never leak into training, prompting, or evaluation.
+# 模型隔离保证：
+#   - 实验模型（Qwen3.5 9B）执行实际抽取任务。
+#   - 标注模型（Qwen3.6 27B、Gemma4 31B）仅用于金标准标签生成，与实验流水线
+#     完全隔离。其预测不会渗入训练、提示或评估。
 #
-# Sections:
-#   1. server       — llama.cpp connection parameters.
-#   2. models       — model identities grouped by role.
-#   3. generation   — shared LLM sampling parameters.
-#   4. stanza       — Stanza NLP pipeline configuration.
-#   5. reflexion    — Reflexion self-correction parameters.
+# 章节：
+#   1. server       — llama.cpp 连接参数。
+#   2. models       — 按角色分组的模型标识。
+#   3. generation   — 共享 LLM 采样参数。
+#   4. stanza       — Stanza NLP 流水线配置。
+#   5. reflexion    — Reflexion 自纠错参数。
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# 1. Server Configuration
+# 1. 服务配置
 # ---------------------------------------------------------------------------
-# Defines how the Python client reaches the llama.cpp server.  The server
-# must be started separately (e.g., `llama-server -m <model>.gguf --port 8080`)
-# before running any extraction or annotation jobs.
+# 定义 Python 客户端如何连接 llama.cpp 服务。须先单独启动服务（例如
+# `llama-server -m <model>.gguf --port 8080`）再运行抽取或标注任务。
 server:
-  # base_url: The root URL of the llama.cpp OpenAI-compatible API.
-  # Full endpoint: http://10.0.16.254:8080/v1/chat/completions
+  # base_url：llama.cpp OpenAI 兼容 API 的根 URL。
+  # 完整端点：http://10.0.16.254:8080/v1/chat/completions
   base_url: "http://10.0.16.254:8080/v1"
 
-  # api_key: llama.cpp does not enforce authentication.  The OpenAI client
-  # library requires a non-empty string, so we supply a placeholder.
+  # api_key：llama.cpp 不强制认证。OpenAI 客户端库要求非空字符串，故提供占位符。
   api_key: "not-needed"
 
-  # timeout: Maximum seconds to wait for a single HTTP request to complete.
-  # 1200 s (20 minutes) for large-model annotation on remote server.
+  # timeout：单次 HTTP 请求完成的最大等待秒数。远程大模型标注使用 1200 秒（20 分钟）。
   timeout: 1200
 
-  # max_retries: Number of times to retry a request on transient failures
-  # (connection refused, 5xx responses).  Exponential backoff is handled
-  # by the OpenAI client library.
+  # max_retries：瞬态失败（连接被拒、5xx 响应）时的重试次数。指数退避由 OpenAI 客户端库处理。
   max_retries: 3
 
 # ---------------------------------------------------------------------------
-# 2. Model Identities
+# 2. 模型标识
 # ---------------------------------------------------------------------------
-# Each model block specifies the llama.cpp model name (passed via --model
-# when launching the server) and a human-readable display name for logging.
+# 各模型块指定 llama.cpp 模型名（启动服务时通过 --model 传入）及用于日志的可读显示名。
 models:
-  # experiment: The model under evaluation.  All extraction experiments use
-  # ONLY this model.  Qwen3.5 9B balances capability with inference speed.
+  # experiment：待评估模型。全部抽取实验仅使用此模型。Qwen3.5 9B 在能力与推理速度间平衡。
   experiment:
     name: "qwen3.5-9b"
     display_name: "Qwen3.5 9B"
 
-  # annotation: Models used exclusively for gold-standard label generation.
-  # These two models independently annotate each sentence; their outputs are
-  # reconciled to produce the final gold labels.  Neither model participates
-  # in extraction experiments.
+  # annotation：专用于金标准标签生成的模型。两模型独立标注每句；输出调和为最终金标。
+  # 均不参与抽取实验。
   annotation:
-    # primary: Larger, more capable model — serves as the primary annotator.
+    # primary：更大、更强的模型——作为主标注器。
     primary:
       name: "qwen3.6-27b"
       display_name: "Qwen3.6 27B"
 
-    # secondary: Second annotator for cross-model agreement and consensus.
+    # secondary：第二标注器，用于跨模型一致性与共识。
     secondary:
       name: "gemma-4-31B-it-Q8_0.gguf"
       display_name: "Gemma 4 31B IT Q8"
 
 # ---------------------------------------------------------------------------
-# 3. Generation Parameters
+# 3. 生成参数
 # ---------------------------------------------------------------------------
-# Controls the LLM sampling behaviour.  We use deterministic decoding
-# (temperature = 0) throughout for reproducibility.  These settings apply
-# to both extraction and annotation passes unless overridden per-prompt.
+# 控制 LLM 采样行为。全程使用确定性解码（temperature = 0）以保证可复现。除非按提示覆盖，
+# 抽取与标注均适用这些设置。
 generation:
-  # temperature: 0.0 forces greedy decoding — the model always picks the
-  # highest-probability token.  This eliminates variance across runs and
-  # makes results perfectly reproducible given the same seed and model.
+  # temperature：0.0 强制贪心解码——模型始终选取最高概率词元。消除运行间方差，
+  # 在相同种子与模型下结果完全可复现。
   temperature: 0.0
 
-  # max_tokens: Upper bound on generated tokens per request.  8192 allows
-  # ample room for structured JSON output and thinking-model reasoning.
+  # max_tokens：单次请求生成词元上限。8192 为结构化 JSON 输出与思维模型推理留足空间。
   max_tokens: 8192
 
-  # annotation_max_tokens: Token budget for annotation/review calls.
-  # Thinking models (Gemma 4) may consume tokens in reasoning_content first.
+  # annotation_max_tokens：标注/审阅调用的词元预算。思维模型（Gemma 4）可能先在 reasoning_content 中消耗词元。
   annotation_max_tokens: 8192
 
-  # seed: Fixed random seed passed to the llama.cpp server for deterministic
-  # sampling.  Together with temperature=0.0, this guarantees bit-identical
-  # output across repeated runs on the same hardware.
+  # seed：传给 llama.cpp 服务的固定随机种子以实现确定性采样。与 temperature=0.0 配合，
+  # 在相同硬件上重复运行保证比特级一致输出。
   seed: 42
 
 # ---------------------------------------------------------------------------
-# 4. Stanza NLP Pipeline
+# 4. Stanza NLP 流水线
 # ---------------------------------------------------------------------------
-# Stanza (StanfordNLP) provides tokenization, POS tagging, lemmatization,
-# and dependency parsing.  The pipeline runs on CPU and is the primary
-# source of syntactic features for constraint-based validation.
+# Stanza（StanfordNLP）提供分词、词性标注、词形还原与依存句法分析。流水线在 CPU 上运行，
+# 是约束验证所用句法特征的主要来源。
 stanza:
-  # lang: Language code for the Stanza pipeline.  The legal contracts in
-  # this study are in English.
+  # lang：Stanza 流水线语言代码。本研究法律合同为英文。
   lang: "en"
 
-  # processors: Comma-separated list of Stanza processors to load.
-  #   tokenize — sentence splitting and word tokenization
-  #   mwt      — multi-word token expansion (e.g., "don't" → "do not")
-  #   pos      — part-of-speech tagging (UPOS + XPOS + UFeats)
-  #   lemma    — lemmatization (canonical dictionary form)
-  #   depparse — Universal Dependencies (UD) dependency parsing
-  # NER is intentionally omitted; it is not needed for the UD-based
-  # relation extraction pipeline.
+  # processors：要加载的 Stanza 处理器逗号分隔列表。
+  #   tokenize — 分句与分词
+  #   mwt      — 多词词元展开（如 "don't" → "do not"）
+  #   pos      — 词性标注（UPOS + XPOS + UFeats）
+  #   lemma    — 词形还原（规范词典形式）
+  #   depparse — Universal Dependencies（UD）依存句法分析
+  # 有意省略 NER；基于 UD 的关系抽取流水线不需要。
   processors: "tokenize,mwt,pos,lemma,depparse"
 
-  # download_method: "REUSE_RESOURCES" tells Stanza to use cached model
-  # files if already downloaded, avoiding redundant downloads on every run.
+  # download_method："REUSE_RESOURCES" 指示 Stanza 在已下载时使用缓存模型文件，
+  # 避免每次运行重复下载。
   download_method: "REUSE_RESOURCES"
 
 # ---------------------------------------------------------------------------
-# 5. Reflexion Correction Parameters
+# 5. Reflexion 纠错参数
 # ---------------------------------------------------------------------------
-# Reflexion is a self-correction mechanism where the model reviews its own
-# extraction output against structured error hints and produces a revised
-# answer.  We cap iterations at 1 to prevent over-correction (where the
-# model "fixes" correct extractions into incorrect ones).
+# Reflexion 为自纠错机制：模型对照结构化错误提示审阅自身抽取输出并产生修订答案。
+# 迭代上限为 1，以防过度纠错（将正确抽取“修正”为错误）。
 reflexion:
-  # max_iterations: Maximum number of Reflexion correction passes.  Set to
-  # 1 because pilot experiments showed diminishing returns (and occasional
-  # degradation) beyond a single correction round.
+  # max_iterations：Reflexion 纠错轮次上限。设为 1，因试点实验显示单轮之后收益递减
+  # （且偶有退化）。
   max_iterations: 1
 
-  # temperature: Separate temperature for the Reflexion correction step.
-  # Also set to 0.0 for deterministic behavior.
+  # temperature：Reflexion 纠错步骤的独立 temperature。同样设为 0.0 以保证确定性行为。
   temperature: 0.0

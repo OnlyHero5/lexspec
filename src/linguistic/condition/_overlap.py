@@ -1,5 +1,5 @@
 """
-Condition span overlap calculation and main-clause-overlap detection.
+条件跨度重叠计算与主句重叠检测。
 """
 
 from __future__ import annotations
@@ -17,35 +17,34 @@ def compute_condition_overlap(
     ud_condition_span: ConditionSpan,
     tree: DependencyTree,
 ) -> float:
-    """Compute the token-level overlap between LLM condition text
-    and a UD-derived condition span.
+    """计算大语言模型条件文本与 UD 推导条件跨度之间的
+    词元级重叠。
 
-    Uses Jaccard similarity (intersection over union) on token sets
-    after normalization. This is the primary metric for evaluating
-    condition boundary accuracy (used by validator Step 5).
+    在规范化后的词元集上使用 Jaccard 相似度（交并比）。
+    这是评估条件边界准确性的主要指标（校验器步骤 5 使用）。
 
     IoU = |tokens(LLM) ∩ tokens(UD)| / |tokens(LLM) ∪ tokens(UD)|
 
-    Higher IoU means more accurate boundary extraction:
-      IoU = 1.0  -> Perfect match (unlikely with different tokenizers)
-      IoU >= 0.8 -> Excellent match (acceptable)
-      IoU >= 0.5 -> Moderate match (check for boundary issues)
-      IoU < 0.5  -> Poor match (likely boundary error)
+    IoU 越高表示边界抽取越准确：
+      IoU = 1.0  -> 完全匹配（不同分词器下少见）
+      IoU >= 0.8 -> 优秀匹配（可接受）
+      IoU >= 0.5 -> 中等匹配（需检查边界问题）
+      IoU < 0.5  -> 匹配差（可能为边界错误）
 
-    Args:
-        llm_condition_text: The condition text from the LLM extraction.
-        ud_condition_span: The UD-derived ConditionSpan.
-        tree: Dependency tree (for tokenization reference).
+    参数：
+        llm_condition_text: 大语言模型抽取的条件文本。
+        ud_condition_span: UD 推导的 ConditionSpan。
+        tree: 依存树（供分词参考）。
 
-    Returns:
-        Jaccard similarity score between 0.0 and 1.0.
+    返回：
+        0.0 到 1.0 之间的 Jaccard 相似度分数。
     """
-    # Tokenize both texts into sets of lowercase word tokens.
-    # We use simple whitespace tokenization for the LLM output
-    # because it may not match the Stanza tokenization exactly.
+    # 将双方文本分词为小写词元集合。
+    # 对大语言模型输出使用简单空白分词，
+    # 因其可能与 Stanza 分词不完全一致。
     llm_tokens = set(llm_condition_text.lower().split())
 
-    # For UD tokens, use the actual Stanza token texts from the span.
+    # UD 词元使用跨度中实际 Stanza 词元文本。
     ud_tokens = set()
     for token_idx in ud_condition_span.tokens:
         token = tree.get_token(token_idx)
@@ -53,10 +52,10 @@ def compute_condition_overlap(
             ud_tokens.add(token.text.lower())
 
     if not llm_tokens and not ud_tokens:
-        # Both empty — no condition in either. This is a match.
+        # 双方皆空 —— 均无条件。视为匹配。
         return 1.0
     if not llm_tokens or not ud_tokens:
-        # One has a condition, the other doesn't — complete mismatch.
+        # 一方有条件、另一方无 —— 完全不匹配。
         return 0.0
 
     intersection = llm_tokens & ud_tokens
@@ -76,25 +75,23 @@ def is_condition_in_main_clause(
     condition_span: ConditionSpan,
     tree: DependencyTree,
 ) -> bool:
-    """Heuristic check: does the condition span overlap with the
-    main clause subject or predicate region?
+    """启发式检查：条件跨度是否与主句主语或谓词区域重叠？
 
-    If a condition span includes the main predicate or its subject,
-    the extractor has likely drawn the boundary incorrectly (over-extraction).
+    若条件跨度包含主谓词或其主语，
+    提取器可能错误划定边界（过度抽取）。
 
-    Args:
-        condition_span: The extracted condition span.
-        tree: Dependency tree.
+    参数：
+        condition_span: 提取的条件跨度。
+        tree: 依存树。
 
-    Returns:
-        True if the condition appears to include main clause elements
-        (suggesting boundary error).
+    返回：
+        条件似乎包含主句成分时返回 True（提示边界错误）。
     """
     root_idx = tree.root_index
     if root_idx is None:
         return False
 
-    # Get the main predicate region (predicate + its immediate args).
+    # 获取主谓词区域（谓词及其直接论元）。
     main_indices: Set[int] = {root_idx}
     for child in tree.get_children(root_idx):
         if child.deprel in ("nsubj", "nsubj:pass", "obj", "aux", "aux:pass"):

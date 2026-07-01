@@ -1,10 +1,10 @@
 """
-Command implementations and CLI builder for the annotation pipeline.
+标注流水线的命令实现与 CLI 构建器。
 
-Exposes three subcommands:
-  - annotate:  Run independent annotation with a single model.
-  - review:    Cross-review one model's annotations using another model.
-  - merge:     Merge annotations and review results into gold standard.
+提供三个子命令：
+  - annotate:  使用单个模型进行独立标注。
+  - review:    用另一模型跨审查某模型的标注。
+  - merge:     将标注与审查结果合并为金标准。
 """
 
 from __future__ import annotations
@@ -34,16 +34,15 @@ logger = get_logger(__name__)
 
 
 # ======================================================================
-# Stage 1 + 2: Annotation
+# 阶段 1 + 2：标注
 # ======================================================================
 
 
 def cmd_annotate(args: argparse.Namespace) -> None:
-    """Run independent annotation: annotate all clauses in the test set
-    with a single model.
+    """运行独立标注：用单个模型标注测试集中全部条款。
 
-    Supports --resume for checkpoint/resume (skips already-annotated clauses).
-    Deduplicates after completion to remove duplicates from resume.
+    支持 --resume 断点续跑（跳过已标注条款）。
+    完成后去重，移除续跑产生的重复记录。
     """
     config = load_config(args.config)
 
@@ -76,7 +75,7 @@ def cmd_annotate(args: argparse.Namespace) -> None:
         return
 
     def annotate_one(clause: dict, _idx: int, _total: int) -> dict:
-        """Single-annotation worker: each thread creates its own client and annotator."""
+        """单条标注工作线程：每线程创建自己的客户端与标注器。"""
         client = build_client(config, args.model)
         annotator = LLMAnnotator(client, prompts_path=args.prompts)
         clause_id = clause.get("clause_id", "UNK")
@@ -123,15 +122,14 @@ def cmd_annotate(args: argparse.Namespace) -> None:
 
 
 # ======================================================================
-# Stage 3: Cross-review
+# 阶段 3：跨模型审查
 # ======================================================================
 
 
 def cmd_review(args: argparse.Namespace) -> None:
-    """Run cross-review: use one model to review another model's annotations.
+    """运行跨模型审查：用一个模型审查另一模型的标注。
 
-    The reviewing model judges each field as accept/reject and provides
-    corrections for problematic fields.
+    审查模型将各字段判为接受/拒绝，并对有问题字段给出修正。
     """
     config = load_config(args.config)
     reviewer_role = MODEL_ALIASES.get(args.reviewer, args.reviewer)
@@ -161,7 +159,7 @@ def cmd_review(args: argparse.Namespace) -> None:
         return
 
     def review_one(src: dict, _idx: int, _total: int) -> dict:
-        """Single-review worker function."""
+        """单条审查工作函数。"""
         client = build_client(config, args.reviewer)
         reviewer = CrossModelReviewer(
             client, reviewer_role=reviewer_role, prompts_path=args.prompts,
@@ -213,12 +211,12 @@ def cmd_review(args: argparse.Namespace) -> None:
 
 
 # ======================================================================
-# CLI builder
+# CLI 构建器
 # ======================================================================
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the command-line argument parser."""
+    """构建命令行参数解析器。"""
     parser = argparse.ArgumentParser(
         description="LexSpec staged annotation pipeline: annotate / review / merge",
     )
@@ -226,7 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompts", default="configs/prompts.yaml", help="Prompt config file path")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # ---- annotate subcommand ----
+    # ---- annotate 子命令 ----
     p_ann = sub.add_parser("annotate", help="Annotate the test set with a single model")
     p_ann.add_argument(
         "--model", required=True,
@@ -248,7 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable tqdm progress bar",
     )
 
-    # ---- review subcommand ----
+    # ---- review 子命令 ----
     p_rev = sub.add_parser("review", help="Review one model's annotations with another model")
     p_rev.add_argument(
         "--reviewer", required=True,
@@ -269,7 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_rev.add_argument("--no-progress", action="store_true", help="Disable tqdm progress bar")
 
-    # ---- merge subcommand ----
+    # ---- merge 子命令 ----
     p_merge = sub.add_parser("merge", help="Merge annotations and reviews into gold standard")
     p_merge.add_argument("--qwen", default=QWEN_ANNOT, help="Qwen annotation file path")
     p_merge.add_argument("--gemma", default=GEMMA_ANNOT, help="Gemma annotation file path")

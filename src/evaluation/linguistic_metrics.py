@@ -1,14 +1,13 @@
 """
-Combined linguistic metrics entry point.
+语言学指标统一入口。
 
-Aggregates the four linguistic-specific evaluation metrics:
-  1. Dependency Path Legality Rate (dep_path_metrics.py)
-  2. Passive Voice Recovery Accuracy (passive_metrics.py)
-  3. Condition Boundary IoU (condition_metrics.py)
-  4. Linguistic Correction Rate (condition_metrics.py)
+聚合四项语言学专用评估指标：
+  1. 依存路径合法率（dep_path_metrics.py）
+  2. 被动语态恢复准确率（passive_metrics.py）
+  3. 条件边界 IoU（condition_metrics.py）
+  4. 语言学修正率（condition_metrics.py）
 
-These metrics serve as diagnostic tools: they help identify which linguistic
-phenomena are causing extraction failures, guiding targeted improvements.
+这些指标作诊断工具：帮助识别导致抽取失败的语言学现象，指导针对性改进。
 """
 
 from __future__ import annotations
@@ -32,30 +31,28 @@ def compute_all_linguistic_metrics(
     trees: List[DependencyTree],
     validation_results: Optional[List[ValidationResult]] = None,
 ) -> Dict[str, Any]:
-    """Compute all four linguistic metrics in a single call.
+    """一次调用计算全部四项语言学指标。
 
-    This is the primary entry point for the linguistic evaluation dimension.
-    It returns a comprehensive dict with all metric groups that can be
-    serialized directly to JSON for the evaluation report.
+    语言学评估维度的主入口。
+    返回可直接序列化为 JSON 写入评估报告的综合字典。
 
-    Args:
-        predictions: List of predicted LegalTriplets.
-        gold: List of gold-standard LegalTriplets.
-        trees: List of DependencyTree objects from UD parsing.
-        validation_results: Optional list of ValidationResult objects.
-                            If None, correction rate metrics are omitted.
+    参数:
+        predictions: 预测 LegalTriplet 列表。
+        gold: 金标准 LegalTriplet 列表。
+        trees: UD 解析得到的 DependencyTree 列表。
+        validation_results: 可选 ValidationResult 列表。
+                            为 None 时省略修正率指标。
 
-    Returns:
-        Dict with the following top-level keys:
+    返回:
+        顶层键包括：
         - dependency_path_legality: float
-        - passive_recovery: Dict[str, float] (passive voice metrics)
+        - passive_recovery: Dict[str, float]（被动语态指标）
         - condition_iou: float
-        - correction_analysis: Dict[str, float] or None
-        - summary: Dict with aggregated highlights for report inclusion
+        - correction_analysis: Dict[str, float] 或 None
+        - summary: Dict，报告用聚合亮点
 
-    Raises:
-        ValueError: If the core inputs (predictions, gold, trees) have
-                    mismatched lengths.
+    异常:
+        ValueError: 核心输入（predictions、gold、trees）长度不一致。
     """
     n = len(predictions)
     if n != len(gold) or n != len(trees):
@@ -64,21 +61,21 @@ def compute_all_linguistic_metrics(
             f"Got predictions={len(predictions)}, gold={len(gold)}, trees={len(trees)}."
         )
 
-    # Metric 1: Dependency path legality.
+    # 指标 1：依存路径合法性。
     legality = compute_dependency_path_legality(predictions, trees)
 
-    # Metric 2: Passive voice recovery accuracy.
+    # 指标 2：被动语态恢复准确率。
     passive_metrics = compute_passive_recovery_accuracy(predictions, trees, gold)
 
-    # Metric 3: Condition boundary IoU.
+    # 指标 3：条件边界 IoU。
     condition_iou = compute_condition_iou(predictions, trees)
 
-    # Metric 4: Correction rate (only if validation results are provided).
+    # 指标 4：修正率（仅当提供验证结果时）。
     correction_metrics = None
     if validation_results is not None:
         correction_metrics = compute_correction_rate(validation_results)
 
-    # Build a summary for the evaluation report.
+    # 构建评估报告摘要。
     summary = {
         "linguistic_quality_indicators": {
             "dependency_legality": legality,

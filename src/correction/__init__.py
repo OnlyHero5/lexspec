@@ -1,21 +1,11 @@
 """
-LexSpec Correction (Reflexion) Package
-=======================================
-Self-correction module that uses structured error feedback to prompt
-the LLM to re-extract legal triplets when the UD constraint validator
-detects structural errors.
+LexSpec 纠错（Reflexion）包
+===========================
+当 UD 约束校验器检测到结构错误并返回 REFLEXION_REQUIRED 时，
+本自纠错模块利用结构化错误反馈提示 LLM 重新抽取法律三元组。
 
-All prompt templates and error hints are loaded from configs/prompts.yaml.
-No hardcoded fallbacks.
-
-Package structure:
-  - reflexion.py:           ReflexionGenerator class (main orchestrator)
-  - prompt_loader.py:        YAML prompt loading (no fallbacks)
-  - error_analyzer.py:       Error type determination from validation results
-  - response_parser.py:      LLM response parsing for corrections
-
-Public API:
-  - ReflexionGenerator: Main class orchestrating the Reflexion loop
+全部提示模板与错误提示从 configs/prompts.yaml 加载。
+距离阈值从 configs/constraints.yaml 加载。
 """
 
 from src.correction.reflexion import ReflexionGenerator

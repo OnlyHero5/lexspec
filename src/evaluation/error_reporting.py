@@ -1,8 +1,7 @@
 """
-Error reporting: per-experiment error analysis and cross-experiment comparison.
+错误报告：单实验错误分析与跨实验比较。
 
-Provides functions to analyze errors for a single experiment and print
-comparison tables across all experiments.
+提供单实验错误分析函数，并打印全部实验的比较表。
 """
 
 from __future__ import annotations
@@ -30,32 +29,33 @@ def analyze_experiment_errors(
     gold: List[LegalTriplet],
     trees: List[DependencyTree],
     output_dir: str,
+    constraints_path: str = "configs/constraints.yaml",
 ) -> Dict[str, Any]:
-    """Run full error analysis for one experiment.
+    """对单个实验运行完整错误分析。
 
-    Steps:
-      1. Convert predictions to LegalTriplet objects.
-      2. Run ``classify_errors()`` to generate ErrorCase objects.
-      3. Compute error distribution statistics.
-      4. Save categorized error cases to JSONL files.
-      5. Return a summary dict for the comparison table.
+    步骤:
+      1. 将预测转换为 LegalTriplet 对象。
+      2. 运行 ``classify_errors()`` 生成 ErrorCase 对象。
+      3. 计算错误分布统计。
+      4. 将分类错误案例保存为 JSONL 文件。
+      5. 返回供比较表使用的摘要字典。
 
-    Args:
-        experiment_name:  e.g., "baseline", "ours_dep", "ours_reflexion".
-        predictions:      List of prediction dicts from the experiment.
-        gold:             List of gold-standard LegalTriplets.
-        trees:            List of DependencyTree objects (same length).
-        output_dir:       Directory for error case files.
+    参数:
+        experiment_name:  例如 "baseline"、"ours_dep"、"ours_reflexion"。
+        predictions:      该实验的预测字典列表。
+        gold:             金标准 LegalTriplet 列表。
+        trees:            DependencyTree 对象列表（等长）。
+        output_dir:       错误案例文件输出目录。
 
-    Returns:
-        Dict with error distribution statistics and summary.
+    返回:
+        含错误分布统计与摘要的字典。
     """
     logger.info("Analyzing errors for experiment: %s", experiment_name)
 
-    # Convert predictions.
+    # 转换预测。
     pred_triplets = load_predictions_as_triplets(predictions)
 
-    # Align lengths.
+    # 对齐长度。
     n = min(len(pred_triplets), len(gold), len(trees))
     if n == 0:
         logger.warning("No data for %s -- skipping error analysis", experiment_name)
@@ -71,25 +71,26 @@ def analyze_experiment_errors(
     gold = gold[:n]
     trees_used = trees[:n]
 
-    # Classify errors.
+    # 分类错误。
     error_cases: List[ErrorCase] = classify_errors(
         predictions=pred_triplets,
         gold=gold,
         trees=trees_used,
+        constraints_path=constraints_path,
     )
 
-    # Compute distribution.
+    # 计算分布。
     dist = error_distribution_report(error_cases)
 
-    # Save categorized error cases.
+    # 保存分类错误案例。
     exp_error_dir = Path(output_dir) / experiment_name
     save_error_cases(error_cases, str(exp_error_dir))
 
-    # Generate and print summary.
+    # 生成并打印摘要。
     summary_text = generate_error_summary(error_cases)
     print(f"\n{summary_text}")
 
-    # Build return dict.
+    # 构建返回字典。
     return {
         "experiment": experiment_name,
         "total_samples": n,
@@ -105,19 +106,18 @@ def analyze_experiment_errors(
 def print_error_comparison_table(
     results: Dict[str, Dict[str, Any]],
 ) -> None:
-    """Print a comparison table of error statistics across experiments.
+    """打印跨实验错误统计比较表。
 
-    Shows error count, error rate, and primary category distribution
-    side-by-side for quick comparison.
+    并排展示错误数、错误率及主类别分布，便于快速比较。
 
-    Args:
-        results:  Dict mapping experiment name -> error analysis summary dict.
+    参数:
+        results:  实验名 -> 错误分析摘要字典 的映射。
     """
     print("\n" + "=" * 80)
     print("ERROR ANALYSIS COMPARISON -- ALL EXPERIMENTS")
     print("=" * 80)
 
-    # Per-experiment overall stats.
+    # 各实验总体统计。
     print(f"\n{'Experiment':<20s} {'Samples':>8s} {'Errors':>8s} {'ErrorRate':>10s}")
     print("-" * 46)
     for name in ["baseline", "ours_dep", "ours_reflexion"]:
@@ -131,7 +131,7 @@ def print_error_comparison_table(
             f"{r.get('error_rate', 0):>9.1%}"
         )
 
-    # Primary category distribution.
+    # 主类别分布。
     print("\n--- Primary Category Distribution (Linguistic Phenomenon) ---")
     all_categories = sorted(set(
         cat for r in results.values()
@@ -152,7 +152,7 @@ def print_error_comparison_table(
             line += f" {cnt:>18d}"
         print(line)
 
-    # Secondary category distribution.
+    # 次类别分布。
     print("\n--- Secondary Category Distribution (Field Error Type) ---")
     all_fields = sorted(set(
         f for r in results.values()

@@ -1,43 +1,41 @@
 """
-LexSpec Annotation Package
-===========================
-Dual-model annotation pipeline for gold-standard test set construction.
+LexSpec 标注包
+==============
+用于构建金标准测试集的双模型标注流水线。
 
-This package implements the multi-annotator workflow used exclusively in
-Phase 1 (LexSpec-100 test set construction). Two annotation models
-(Qwen3.6 27B, Gemma4 31B) independently annotate each contract clause,
-and their outputs are reconciled through field-level voting consensus.
+本包实现仅在第一阶段（LexSpec-100 测试集构建）中使用的多标注者工作流。
+两个标注模型（Qwen3.6 27B、Gemma4 31B）独立标注每条合同条款，
+输出通过字段级投票共识进行调和。
 
-IMPORTANT: These models are COMPLETELY ISOLATED from the experiment model
-(Qwen3.5 9B) used in Phases 2-3. Annotation model predictions never leak
-into training, prompting, or evaluation.
+重要：这些模型与第二、三阶段使用的实验模型（Qwen3.5 9B）完全隔离。
+标注模型的预测不会泄漏到训练、提示或评估中。
 
-Package structure:
-  - llm_annotator.py:       LLMAnnotator class for single-model annotation
-  - consensus.py:           Field-level voting, disagreement resolution,
-                            gold-standard construction
-  - statistics.py:          Inter-annotator agreement statistics computation
-  - normalization.py:       Text normalization for fuzzy comparison
-  - field_helpers.py:       Field extraction, parsing, and comparison helpers
-  - triplet_coercion.py:    JSON-to-LegalTriplet coercion utilities
-  - prompts.py:             Prompt loading from YAML (no fallbacks)
-  - response_parser.py:     LLM response parsing for annotations
-  - disagreement_logger.py: AnnotationDisagreement recording
-  - disagreement_io.py:     Disagreement record persistence (JSONL I/O)
-  - reviewer.py:            Cross-model annotation reviewer
+包结构：
+  - llm_annotator.py:       单模型标注的 LLMAnnotator 类
+  - consensus.py:           字段级投票、分歧解决、
+                            金标准构建
+  - statistics.py:          标注者间一致性统计计算
+  - normalization.py:       模糊比较用的文本规范化
+  - field_helpers.py:       字段提取、解析与比较辅助函数
+  - triplet_coercion.py:    JSON 转 LegalTriplet 的强制转换工具
+  - prompts.py:             从 YAML 加载提示词（无回退）
+  - response_parser.py:     标注用的 LLM 响应解析
+  - disagreement_logger.py: AnnotationDisagreement 记录
+  - disagreement_io.py:     分歧记录持久化（JSONL 读写）
+  - reviewer.py:            跨模型标注审查器
 
-Public API:
-  - LLMAnnotator:              Annotate clauses with a single LLM
-  - CrossModelReviewer:        Have one LLM review another's annotations
-  - field_level_consensus:     Compare two annotations field-by-field
-  - resolve_disagreement:      Apply human resolution to a disagreement
-  - build_gold_from_consensus: Build final gold triplet from consensus data
-  - generate_annotation_stats: Compute inter-annotator agreement statistics
-  - normalize_text:            Normalize text for fuzzy comparison
-  - coerce_to_triplet:         Coerce raw JSON data to LegalTriplet
-  - infer_condition_type:      Infer condition type from text (canonical)
-  - log_disagreement:          Create AnnotationDisagreement records
-  - save_disagreement_log:     Persist disagreement records to JSONL
+公开 API：
+  - LLMAnnotator:              使用单个 LLM 标注条款
+  - CrossModelReviewer:        让一个 LLM 审查另一模型的标注
+  - field_level_consensus:     逐字段比较两份标注
+  - resolve_disagreement:      将人工裁决应用于分歧
+  - build_gold_from_consensus: 从共识数据构建最终金标准三元组
+  - generate_annotation_stats: 计算标注者间一致性统计
+  - normalize_text:            模糊比较用的文本规范化
+  - coerce_to_triplet:         将原始 JSON 强制转换为 LegalTriplet
+  - infer_condition_type:      从文本推断条件类型（规范版本）
+  - log_disagreement:          创建 AnnotationDisagreement 记录
+  - save_disagreement_log:     将分歧记录持久化到 JSONL
 """
 
 from src.annotation.llm_annotator import LLMAnnotator

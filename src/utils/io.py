@@ -1,4 +1,4 @@
-"""Backward-compatibility shim. New code should import from src.utils.jsonl_io / json_io."""
+"""向后兼容垫片。新代码应从 src.utils.jsonl_io / json_io 导入。"""
 from src.utils.jsonl_io import (
     read_jsonl, read_jsonl_stream, write_jsonl, append_jsonl,
     load_pydantic_list, save_pydantic_list,

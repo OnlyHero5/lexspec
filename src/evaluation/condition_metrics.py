@@ -1,10 +1,8 @@
 """
-Condition Boundary IoU and Linguistic Correction Rate metrics.
+条件边界 IoU 与语言学修正率指标。
 
-  - Condition Boundary IoU: Measures token-level Intersection-over-Union
-    between predicted condition spans and UD-derived condition clause spans.
-  - Linguistic Correction Rate: Statistics on how often the UD constraint
-    validator successfully corrects LLM extraction errors.
+  - 条件边界 IoU：预测条件片段与 UD 推导条件片段间的词元级交并比。
+  - 语言学修正率：UD 约束验证器成功修正 LLM 抽取错误的频次统计。
 """
 
 from __future__ import annotations
@@ -24,34 +22,29 @@ def compute_condition_iou(
     predictions: List[LegalTriplet],
     trees: List[DependencyTree],
 ) -> float:
-    """Compute mean token-level IoU between predicted condition spans
-    and UD condition clause spans.
+    """计算预测条件片段与 UD 条件片段间的平均词元级 IoU。
 
-    For each clause where both the prediction and UD tree have a condition
-    (i.e., advcl relation present in the tree AND the prediction has non-empty
-    condition.text), compute:
+    对每个预测与 UD 树均含条件的子句（树中有 advcl 且
+    prediction.condition.text 非空），计算：
 
         IoU = |prediction_tokens ∩ condition_subtree_tokens| /
               |prediction_tokens ∪ condition_subtree_tokens|
 
-    This measures how accurately the system identifies condition clause
-    boundaries. Perfect IoU = 1.0 means the predicted span exactly matches
-    the UD-derived condition clause span.
+    衡量系统识别条件从句边界的准确度。IoU = 1.0 表示预测片段
+    与 UD 条件片段完全一致。
 
-    Clauses where neither prediction nor tree has a condition are excluded
-    (they trivially agree). Clauses where only one side has a condition
-    count as IoU = 0.0 for that clause.
+    两侧均无条件的子句排除（显然一致，对 IoU 无信息量）。
+    仅一侧有条件时该子句 IoU = 0.0。
 
-    Args:
-        predictions: List of predicted LegalTriplets.
-        trees: List of DependencyTree objects (same length).
+    参数:
+        predictions: 预测 LegalTriplet 列表。
+        trees: DependencyTree 列表（等长）。
 
-    Returns:
-        Mean IoU across all clause pairs where at least one side has a
-        condition. Float in [0, 1].
+    返回:
+        至少一侧有条件的全部子句对的平均 IoU。[0, 1] 浮点数。
 
-    Raises:
-        ValueError: If input lists have different lengths.
+    异常:
+        ValueError: 输入列表长度不同。
     """
     if len(predictions) != len(trees):
         raise ValueError(
@@ -67,36 +60,36 @@ def compute_condition_iou(
         if tree.token_count == 0:
             continue
 
-        # Check if the UD tree has a condition clause (advcl).
+        # 检查 UD 树是否含条件从句（advcl）。
         advcl_tokens = tree.find_tokens_by_deprel("advcl")
         has_tree_condition = len(advcl_tokens) > 0
         has_pred_condition = bool(pred.condition.text and pred.condition.text.strip())
 
         if not has_tree_condition and not has_pred_condition:
-            # Both agree there is no condition — skip (not informative for IoU).
+            # 两侧均无条件 — 跳过（对 IoU 无信息量）。
             skipped_no_condition += 1
             continue
 
-        # Get prediction condition tokens.
+        # 获取预测条件词元。
         pred_text = normalize(pred.condition.text, remove_articles=True)
         pred_token_set = set(pred_text.split()) if pred_text else set()
 
-        # Get tree condition subtree tokens (from all advcl spans).
+        # 获取树条件子树词元（全部 advcl 片段）。
         tree_condition_set: Set[str] = set()
         for advcl_token in advcl_tokens:
-            # Get the full subtree of this advcl head.
+            # 取该 advcl 中心的完整子树。
             subtree_tokens = tree.get_subtree_tokens(advcl_token.index)
             for st in subtree_tokens:
-                # Use lemma for robust matching (normalized).
+                # 用词形基形式匹配（归一化后）。
                 tree_condition_set.add(st.lemma.lower())
 
         if not pred_token_set or not tree_condition_set:
-            # One side has no tokens — IoU = 0.
+            # 一侧无词元 — IoU = 0。
             ious.append(0.0)
             skipped_one_side += 1
             continue
 
-        # Compute IoU.
+        # 计算 IoU。
         intersection = pred_token_set & tree_condition_set
         union = pred_token_set | tree_condition_set
 
@@ -115,34 +108,30 @@ def compute_condition_iou(
 def compute_correction_rate(
     validation_results: List[ValidationResult],
 ) -> Dict[str, float]:
-    """Compute statistics on how often the UD constraint validator
-    successfully corrects LLM extraction errors.
+    """统计 UD 约束验证器成功修正 LLM 抽取错误的频次。
 
-    The validator produces one of three statuses per prediction:
-      - VALID:              Prediction matches UD evidence; no corrections.
-      - CORRECTED:          Minor field errors were automatically fixed.
-      - REFLEXION_REQUIRED: Structural errors requiring LLM re-extraction.
+    验证器对每个预测产生三种状态之一：
+      - VALID:              预测与 UD 证据一致；无需修正。
+      - CORRECTED:          轻微字段错误已自动修复。
+      - REFLEXION_REQUIRED: 结构性错误，需 LLM 重新抽取。
 
-    This metric reports the distribution of these statuses and the
-    correction success rate: how often the validator can fix an error
-    automatically (CORRECTED) vs. needing LLM re-extraction (REFLEXION).
+    报告这些状态的分布及修正成功率：验证器可自动修正（CORRECTED）
+    与需 LLM 重抽（REFLEXION）的比例。
 
-    Args:
-        validation_results: List of ValidationResult objects from the
-                            UD constraint validator.
+    参数:
+        validation_results: UD 约束验证器产生的 ValidationResult 列表。
 
-    Returns:
-        Dict with keys:
-        - total_validated: int — total number of validation results.
-        - valid_count: int — results with VALID status.
-        - valid_rate: float — VALID / total.
-        - corrected_count: int — results with CORRECTED status.
-        - corrected_rate: float — CORRECTED / total.
-        - reflexion_count: int — results with REFLEXION_REQUIRED status.
-        - reflexion_rate: float — REFLEXION_REQUIRED / total.
-        - correction_success_rate: float — CORRECTED / (CORRECTED + REFLEXION).
-          This is the proportion of errors that the validator can fix
-          automatically without LLM re-extraction.
+    返回:
+        字典，键包括：
+        - total_validated: int — 验证结果总数。
+        - valid_count: int — VALID 状态数。
+        - valid_rate: float — VALID / total。
+        - corrected_count: int — CORRECTED 状态数。
+        - corrected_rate: float — CORRECTED / total。
+        - reflexion_count: int — REFLEXION_REQUIRED 状态数。
+        - reflexion_rate: float — REFLEXION_REQUIRED / total。
+        - correction_success_rate: float — CORRECTED / (CORRECTED + REFLEXION)。
+          表示无需 LLM 重抽即可自动修正的错误比例。
     """
     total = len(validation_results)
     if total == 0:
@@ -167,8 +156,7 @@ def compute_correction_rate(
     corrected_rate = corrected_count / total
     reflexion_rate = reflexion_count / total
 
-    # Correction success rate: of the errors (corrected + reflexion),
-    # how many could be fixed automatically?
+    # 修正成功率：在错误（corrected + reflexion）中自动修正的比例。
     error_total = corrected_count + reflexion_count
     correction_success_rate = corrected_count / error_total if error_total > 0 else 0.0
 

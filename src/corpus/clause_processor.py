@@ -1,8 +1,8 @@
 """
-Clause extraction and phenomenon annotation.
+条款提取与语言现象标注。
 
-Splits contract contexts into individual sentences (clauses) using Stanza,
-then parses each clause and annotates it with detected language phenomena.
+使用 Stanza 将合同上下文切分为单句（条款），
+再解析每条条款并标注检测到的语言现象。
 """
 
 from __future__ import annotations
@@ -25,25 +25,25 @@ def split_into_clauses(
     contexts: List[str],
     max_contexts: Optional[int] = None,
 ) -> List[str]:
-    """Split paragraph contexts into individual sentences (clauses).
+    """将段落上下文切分为单句（条款）。
 
-    Uses Stanza's sentence splitter to segment each context into sentences,
-    returning a flat list of sentences. Each sentence is a candidate clause.
+    使用 Stanza 分句器将各上下文切分为句子，
+    返回扁平句子列表。每句为候选条款。
 
-    For very large CUAD contexts, contexts can be randomly sampled first
-    to control runtime. Sampling uses a fixed seed (42) for reproducibility.
+    对超大 CUAD 上下文可先随机抽样以控制运行时间。
+    抽样使用固定种子 42 以保证可复现。
 
-    Filters:
-      - Retains sentences with 5-200 tokens
-      - Excludes template text (headers, signatures, etc.)
+    过滤规则：
+      - 保留 5–200 个 token 的句子
+      - 排除模板文本（页眉、签名等）
 
-    Args:
-        parser:        Configured StanzaParser instance.
-        contexts:      List of paragraph context strings.
-        max_contexts:  Max number of contexts to process (0 or None = all).
+    参数：
+        parser:        已配置的 StanzaParser 实例。
+        contexts:      段落上下文字符串列表。
+        max_contexts:  最多处理的上下文数（0 或 None 表示全部）。
 
-    Returns:
-        Flat list of extracted sentence strings.
+    返回：
+        提取出的句子字符串扁平列表。
     """
     if max_contexts and max_contexts > 0 and len(contexts) > max_contexts:
         rng = random.Random(42)
@@ -81,22 +81,23 @@ def build_clause_records(
     parser: StanzaParser,
     clauses: List[str],
     source_label: str,
+    long_distance_mdd: float,
 ) -> Tuple[List[Dict], Dict[str, List[int]]]:
-    """Parse a list of clauses and attach phenomenon annotations.
+    """解析条款列表并附加语言现象标注。
 
-    For each clause, performs dependency parsing and detects language
-    phenomena, building the candidate pool. If parsing fails (extremely
-    rare), silently skips.
+    对每条条款做依存解析并检测语言现象，
+    构建候选池。解析失败时（极罕见）静默跳过。
 
-    Args:
-        parser:       StanzaParser instance.
-        clauses:      List of clause text strings.
-        source_label: Data source label (e.g. "cuad_v1_sentences").
+    参数:
+        parser:       已配置的 ``StanzaParser`` 实例。
+        clauses:      待解析的条款文本字符串列表。
+        source_label: 写入每条记录 ``source`` 字段的数据源标识。
+        long_distance_mdd: 平均依存距离超过此值时标记为长距离依存现象。
 
-    Returns:
-        (clause_records, phenomenon_pools) tuple:
-          - clause_records: list of dicts with text/phenomena/source
-          - phenomenon_pools: phenomenon name -> list of matching record indices
+    返回:
+        二元组 ``(clause_records, phenomenon_pools)``：
+          - ``clause_records``: 含 ``text``、``phenomena``、``source`` 的 dict 列表；
+          - ``phenomenon_pools``: 现象名 → 匹配记录在 ``clause_records`` 中索引的列表。
     """
     clause_records: List[Dict] = []
     phenomenon_pools: Dict[str, List[int]] = defaultdict(list)
@@ -112,7 +113,7 @@ def build_clause_records(
             tree = parser.parse(clause_text)
             if tree.token_count < 3:
                 continue
-            phen = detect_phenomena(tree)
+            phen = detect_phenomena(tree, long_distance_mdd=long_distance_mdd)
         except Exception as exc:
             logger.debug(
                 "Clause %d parse failed (len=%d): %s", idx, len(clause_text), exc,
@@ -128,8 +129,8 @@ def build_clause_records(
         clause_records.append(record)
         record_idx = len(clause_records) - 1
 
-        # Add clause index to phenomenon pools (is_definition is excluded
-        # from stratified sampling).
+        # 将条款索引加入现象池（is_definition 不参与
+        # 分层抽样）。
         if phen["passive"]:
             phenomenon_pools["passive"].append(record_idx)
         if phen["conditional"]:

@@ -1,9 +1,8 @@
 """
-Linguistic explanation dispatcher for error cases.
+错误案例的语言学解释分发器。
 
-Extracted from error_analyzer.py to reduce module size. The dispatcher
-generate_explanation() routes to template functions based on the primary
-error category. Template functions are defined in explanation_templates.py.
+自 error_analyzer.py 拆出以减小模块体积。分发器 generate_explanation()
+按主错误类别路由到模板函数。模板函数定义于 explanation_templates.py。
 """
 
 from __future__ import annotations
@@ -33,36 +32,33 @@ def generate_explanation(
     ud_evidence: Dict[str, Any],
     validation_result: Optional[ValidationResult],
 ) -> str:
-    """Generate a bilingual (Chinese + English) linguistic explanation.
+    """生成中英双语语言学解释。
 
-    The explanation cites specific UD relations, token indices, and
-    syntactic structures that caused the extraction error. The bilingual
-    format serves both Chinese-speaking researchers and international
-    (English-language) publication venues.
+    解释引用具体 UD 关系、词元索引及导致抽取错误的句法结构。
+    双语格式兼顾中文研究者与国际（英文）发表场合。
 
-    Format:
-        [中文标题] (English Title)
-        中文详细解释，引用具体的UD依存关系和句法结构。
-        English detailed explanation, citing specific UD relations
-        and syntactic structures.
+    格式:
+        [中文标题] (英文标题)
+        中文详细解释，引用具体 UD 依存关系与句法结构。
+        英文详细解释，引用具体 UD 关系与句法结构。
 
-    Args:
-        prediction: System prediction.
-        gold: Gold standard.
-        tree: UD tree (may be None).
-        primary: Primary error category.
-        secondary: Secondary error category.
-        field_errors: List of error field paths.
-        ud_evidence: Dict of UD evidence collected during classification.
-        validation_result: Optional validation result for additional context.
+    参数:
+        prediction: 系统预测。
+        gold: 金标准。
+        tree: UD 树（可为 None）。
+        primary: 主错误类别。
+        secondary: 次错误类别。
+        field_errors: 错误字段路径列表。
+        ud_evidence: 分类阶段收集的 UD 证据字典。
+        validation_result: 可选验证结果，供补充上下文。
 
-    Returns:
-        Bilingual natural-language explanation string.
+    返回:
+        双语自然语言解释字符串。
     """
     parts: List[str] = []
 
-    # ---- Header with error type labels ----
-    # Primary category labels in bilingual format.
+    # ---- 含错误类型标签的标题 ----
+    # 主类别双语标签。
     primary_labels = {
         ErrorCategory.PASSIVE_VOICE: "被动语态错误 (Passive Voice Error)",
         ErrorCategory.CONDITIONAL_BOUNDARY: "条件边界错误 (Conditional Boundary Error)",
@@ -72,7 +68,7 @@ def generate_explanation(
         ErrorCategory.OTHER_ERROR: "其他错误 (Other Error)",
     }
 
-    # Secondary category labels.
+    # 次类别标签。
     secondary_labels = {
         FieldErrorType.SUBJECT: "主语错误 (Subject Error)",
         FieldErrorType.ROLE: "角色错误 (Role Error)",
@@ -86,7 +82,7 @@ def generate_explanation(
     header_en = secondary_labels.get(secondary, "Unknown Error")
     parts.append(f"## {header_cn} — {header_en}\n")
 
-    # ---- Prediction vs Gold comparison ----
+    # ---- 预测 vs 金标对比 ----
     parts.append("### 预测 vs 金标 (Prediction vs Gold)\n")
     parts.append(f"- 预测主语 (Pred Subject): `{prediction.subject.text}` [{prediction.subject.role.value}]")
     parts.append(f"- 金标主语 (Gold Subject):  `{gold.subject.text}` [{gold.subject.role.value}]")
@@ -98,7 +94,7 @@ def generate_explanation(
     parts.append(f"- 金标条件 (Gold Condition):  `{gold.condition.text or '(none)'}`")
     parts.append(f"- 错误字段 (Error Fields): {', '.join(field_errors)}\n")
 
-    # ---- Linguistic analysis based on primary category ----
+    # ---- 按主类别的语言学分析 ----
     parts.append("### 语言学分析 (Linguistic Analysis)\n")
 
     if primary == ErrorCategory.PASSIVE_VOICE:
@@ -119,7 +115,7 @@ def generate_explanation(
     else:
         add_generic_explanation(parts, prediction, gold, tree, ud_evidence)
 
-    # ---- UD Evidence section (if available) ----
+    # ---- UD 证据节（若可用） ----
     if tree is not None and tree.token_count > 0 and ud_evidence:
         parts.append("\n### UD依存证据 (UD Dependency Evidence)\n")
         if tree.root_index is not None:
@@ -129,7 +125,7 @@ def generate_explanation(
                              f"(lemma: {root.lemma}, deprel: {root.deprel})")
         parts.append(f"- 句子 (Sentence): `{tree.text[:200]}`")
 
-        # List key UD relations found.
+        # 列出关键 UD 关系。
         rels_found = []
         for deprel in ["nsubj", "nsubj:pass", "obj", "obl:agent", "advcl", "mark",
                         "acl:relcl", "neg", "aux", "aux:pass"]:
@@ -142,7 +138,7 @@ def generate_explanation(
             parts.append("- 相关依存关系 (Relevant dependency relations):")
             parts.extend(rels_found)
 
-    # ---- Validation context (if available) ----
+    # ---- 验证上下文（若可用） ----
     if validation_result is not None and validation_result.corrections:
         parts.append("\n### 验证修正记录 (Validation Corrections)\n")
         for corr in validation_result.corrections:

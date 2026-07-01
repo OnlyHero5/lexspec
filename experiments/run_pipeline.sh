@@ -51,6 +51,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # 默认值
 # ---------------------------------------------------------------------------
 CONFIG="${PROJECT_ROOT}/configs/model.yaml"
+CONSTRAINTS="${PROJECT_ROOT}/configs/constraints.yaml"
 OUTPUT_DIR="${PROJECT_ROOT}/outputs"
 VENV_PATH="${VENV_PATH:-${PROJECT_ROOT}/.venv}"
 LOG_DIR="${OUTPUT_DIR}/logs"
@@ -72,6 +73,7 @@ PIPELINE_END=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --config)       CONFIG="$2"; shift 2 ;;
+        --constraints)  CONSTRAINTS="$2"; shift 2 ;;
         --output-dir)   OUTPUT_DIR="$2"; LOG_DIR="${OUTPUT_DIR}/logs"
                         TIMING_FILE="${LOG_DIR}/pipeline_timing.log"; shift 2 ;;
         --venv)         VENV_PATH="$2"; shift 2 ;;
@@ -184,8 +186,9 @@ timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
 run_step() {
     local STEP_NUM="$1"
     local STEP_NAME="$2"
+    shift 2
+    local -a CMD_ARGS=("$@")
     local SCRIPT_PATH="${SCRIPT_DIR}/step_${STEP_NUM}_${STEP_NAME}.py"
-    local STEP_ARGS="$3"
 
     echo ""
     echo -e "${BOLD}============================================================${NC}"
@@ -206,10 +209,11 @@ run_step() {
     }
 
     set +e
-    python3 "${SCRIPT_PATH}" \
-        --config "${CONFIG}" \
-        --output-dir "${OUTPUT_DIR}" \
-        ${STEP_ARGS} ${EXTRA_ARGS:-}
+    if ((${#CMD_ARGS[@]})); then
+        python3 "${SCRIPT_PATH}" "${CMD_ARGS[@]}"
+    else
+        python3 "${SCRIPT_PATH}"
+    fi
     EXIT_CODE=$?
     set -e
 
@@ -234,6 +238,46 @@ run_step() {
     STEP_TIMES["${STEP_NUM}"]="${TIME_STR}"
     echo "  ${STEP_NUM} ${STEP_NAME} ${STEP_RESULTS[${STEP_NUM}]} ${TIME_STR}" >> "${TIMING_FILE}"
     return ${EXIT_CODE}
+}
+
+run_step_02_annotation() {
+    local STEP_NUM="02"
+    local STEP_NAME="annotate_gold"
+    local SCRIPT_PATH="${SCRIPT_DIR}/step_${STEP_NUM}_${STEP_NAME}.py"
+    local -a SUBCOMMANDS=(
+        "annotate --model gemma"
+        "annotate --model qwen"
+        "review --reviewer qwen --source gemma"
+        "review --reviewer gemma --source qwen"
+        "merge"
+    )
+    local sub
+    local failed=false
+
+    for sub in "${SUBCOMMANDS[@]}"; do
+        # shellcheck disable=SC2206
+        local -a SUB_ARGS=(${sub})
+        echo ""
+        echo -e "${BOLD}  步骤 02 子命令: ${sub}${NC}"
+        set +e
+        python3 "${SCRIPT_PATH}" \
+            --config "${CONFIG}" \
+            --prompts "${PROJECT_ROOT}/configs/prompts.yaml" \
+            "${SUB_ARGS[@]}"
+        local sub_exit=$?
+        set -e
+        if [[ ${sub_exit} -ne 0 ]]; then
+            echo -e "${RED}[失败]${NC} 步骤 02 子命令失败: ${sub} (退出码 ${sub_exit})"
+            failed=true
+        fi
+    done
+
+    if [[ "${failed}" == "true" ]]; then
+        STEP_RESULTS["02"]="失败"
+        return 1
+    fi
+    STEP_RESULTS["02"]="通过"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -270,15 +314,18 @@ main() {
         STEP_RESULTS["01"]="跳过"; STEP_TIMES["01"]="0:00:00"
     else
         run_step "01" "build_corpus" \
-            "--cuad-path ${PROJECT_ROOT}/data/raw/CUAD_v1/CUAD_v1.json" || true
+            --config "${CONFIG}" \
+            --constraints "${CONSTRAINTS}" \
+            --cuad-path "${PROJECT_ROOT}/data/raw/CUAD_v1/CUAD_v1.json" \
+            --output "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
     fi
 
-    # ---- 步骤 02: 标注金标 ----
+    # ---- 步骤 02: 标注金标 (四阶段) ----
     if [[ "${SKIP_02}" == "true" ]]; then
         echo -e "${YELLOW}[跳过]${NC} 步骤 02: annotate_gold"
         STEP_RESULTS["02"]="跳过"; STEP_TIMES["02"]="0:00:00"
     else
-        run_step "02" "annotate_gold" "--model gemma" || true
+        run_step_02_annotation || true
     fi
 
     # ---- 步骤 03: 基线抽取 ----
@@ -287,7 +334,9 @@ main() {
         STEP_RESULTS["03"]="跳过"; STEP_TIMES["03"]="0:00:00"
     else
         run_step "03" "extract_baseline" \
-            "--testset ${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --config "${CONFIG}" \
+            --output-dir "${OUTPUT_DIR}" \
+            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
     fi
 
     # ---- 步骤 04: Dep 抽取 ----
@@ -296,7 +345,9 @@ main() {
         STEP_RESULTS["04"]="跳过"; STEP_TIMES["04"]="0:00:00"
     else
         run_step "04" "extract_dep" \
-            "--testset ${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --config "${CONFIG}" \
+            --output-dir "${OUTPUT_DIR}" \
+            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
     fi
 
     # ---- 步骤 05: Reflexion 抽取 ----
@@ -305,7 +356,9 @@ main() {
         STEP_RESULTS["05"]="跳过"; STEP_TIMES["05"]="0:00:00"
     else
         run_step "05" "extract_reflexion" \
-            "--testset ${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --config "${CONFIG}" \
+            --output-dir "${OUTPUT_DIR}" \
+            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
     fi
 
     # ---- 步骤 06: 评估 ----
@@ -314,7 +367,10 @@ main() {
         STEP_RESULTS["06"]="跳过"; STEP_TIMES["06"]="0:00:00"
     else
         run_step "06" "evaluate" \
-            "--testset ${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --config "${CONFIG}" \
+            --constraints "${CONSTRAINTS}" \
+            --output-dir "${OUTPUT_DIR}" \
+            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
     fi
 
     # ---- 步骤 07: 错误分析 ----
@@ -323,7 +379,10 @@ main() {
         STEP_RESULTS["07"]="跳过"; STEP_TIMES["07"]="0:00:00"
     else
         run_step "07" "analyze_errors" \
-            "--testset ${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --config "${CONFIG}" \
+            --constraints "${CONSTRAINTS}" \
+            --output-dir "${OUTPUT_DIR}" \
+            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
     fi
 
     PIPELINE_END="$(date +%s)"

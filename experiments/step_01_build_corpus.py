@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """
-LexSpec Experiment 01: Build evaluation corpus from CUAD data
-==============================================================
+LexSpec 实验 01: 从 CUAD 数据构建评估语料库
+============================================
 
-Build the LexSpec evaluation corpus from CUAD v1 contract data. Supports two modes:
+从 CUAD v1 合同数据构建 LexSpec 评估语料库。支持两种模式：
 
-  - Stratified sampling mode (default 100 clauses): balanced sampling by
-    phenomenon quotas to ensure passive voice, conditional clauses, relative
-    clauses, long-distance dependencies, and negation each have sufficient
-    samples for statistical comparison.
-  - Full mode (--all): use all valid clauses from all 510 contracts.
+  - 分层抽样模式（默认 100 条条款）：按语言学现象配额均衡抽样，确保被动语态、
+    条件从句、关系从句、长距离依存和否定各拥有足够样本以供统计比较。
+  - 全量模式（--all）：使用全部 510 份合同中的全部有效条款。
 
-Usage::
+用法::
 
     python experiments/step_01_build_corpus.py
     python experiments/step_01_build_corpus.py --all
@@ -22,46 +20,49 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import random
 import sys
 from collections import Counter
 from pathlib import Path
-
-import yaml
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.linguistic.stanza_parser import StanzaParser
 from src.corpus.phenomena_detector import is_boilerplate_clause
 from src.corpus.cuad_loader import load_cuad_data, load_cuad_spans, load_cuad_qa_spans
 from src.corpus.clause_processor import split_into_clauses, build_clause_records
 from src.corpus.selection import select_all_clauses, select_balanced_testset
 from src.utils.logging import setup_logging, get_logger
 from src.utils.io import write_jsonl
+from src.utils.config import 加载模型配置, 构建Stanza解析器
+from src.utils.constraints import (
+    get_corpus_sampling_config,
+    get_phenomenon_quotas,
+    get_validation_thresholds,
+    load_constraints_config,
+)
 
 logger = get_logger(__name__)
 
 
 # ======================================================================
-# Main entry point
+# 主入口
 # ======================================================================
 
 
 def main() -> None:
-    """Main entry point: Build the LexSpec evaluation corpus from CUAD data."""
+    """主入口：从 CUAD 数据构建 LexSpec 评估语料库。"""
     parser = argparse.ArgumentParser(
-        description="LexSpec Experiment 01: Build evaluation corpus from CUAD data",
+        description="LexSpec 实验 01: 从 CUAD 数据构建评估语料库",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--all",
         action="store_true",
         help=(
-            "Full mode: use all valid clauses from all 510 contracts, no "
-            "stratified sampling. Auto-sets --selection-mode all --max-contexts 0 "
-            "--target-count 0, default output to data/processed/lexspec_corpus.jsonl"
+            "全量模式：使用全部 510 份合同中的全部有效条款，不进行分层抽样。"
+            "自动设置 --selection-mode all --max-contexts 0 --target-count 0，"
+            "默认输出至 data/processed/lexspec_corpus.jsonl"
         ),
     )
     parser.add_argument(
@@ -69,86 +70,62 @@ def main() -> None:
         choices=["sentences", "spans", "qa_spans"],
         default="sentences",
         help=(
-            "Clause source: sentences=Stanza sentence segmentation from full "
-            "contracts (largest); spans=master_clauses.csv expert fragments (~5k); "
-            "qa_spans=CUAD JSON answer spans (~13k)"
+            "条款来源：sentences=Stanza 对完整合同进行句子切分（数量最多）；"
+            "spans=master_clauses.csv 专家标注片段（约 5k）；"
+            "qa_spans=CUAD JSON 答案片段（约 13k）"
         ),
     )
     parser.add_argument(
         "--selection-mode",
         choices=["stratified", "all"],
         default="stratified",
-        help="stratified=balanced stratified sampling; all=all valid parsed clauses",
+        help="stratified=均衡分层抽样；all=全部有效且已解析的条款",
+    )
+    parser.add_argument(
+        "--constraints",
+        type=str,
+        default="configs/constraints.yaml",
+        help="约束配置文件路径（抽样配额、阈值）",
     )
     parser.add_argument(
         "--config",
         type=str,
         default="configs/model.yaml",
-        help="Model config file path (default: configs/model.yaml)",
+        help="模型配置文件路径（Stanza 设置）",
     )
     parser.add_argument(
         "--cuad-path",
         type=str,
         default="data/raw/CUAD_v1/CUAD_v1.json",
-        help="CUAD v1 JSON file path",
+        help="CUAD v1 JSON 文件路径",
     )
     parser.add_argument(
         "--master-clauses-path",
         type=str,
         default="data/raw/CUAD_v1/master_clauses.csv",
-        help="CUAD master_clauses.csv path (used with --source spans)",
+        help="CUAD master_clauses.csv 路径（与 --source spans 配合使用）",
     )
     parser.add_argument(
         "--output",
         type=str,
         default="data/processed/lexspec_100.jsonl",
-        help="Output path for the selected test set",
+        help="所选测试集的输出路径",
     )
     parser.add_argument(
         "--target-count",
         type=int,
-        default=100,
-        help="Target clause count for stratified mode (0 = no cap, use all parsed)",
+        default=None,
+        help="覆盖 constraints YAML 中的 corpus_sampling.target_count_default",
     )
     parser.add_argument(
         "--max-contexts",
         type=int,
         default=0,
-        help="Max contract paragraphs to process (0 = all 510; default all)",
-    )
-    parser.add_argument(
-        "--min-passive",
-        type=int,
-        default=20,
-        help="Minimum passive voice clauses (default: 20)",
-    )
-    parser.add_argument(
-        "--min-conditional",
-        type=int,
-        default=20,
-        help="Minimum conditional clause clauses (default: 20)",
-    )
-    parser.add_argument(
-        "--min-relative",
-        type=int,
-        default=15,
-        help="Minimum relative clause clauses (default: 15)",
-    )
-    parser.add_argument(
-        "--min-long-distance",
-        type=int,
-        default=20,
-        help="Minimum long-distance dependency clauses (default: 20)",
-    )
-    parser.add_argument(
-        "--min-negation",
-        type=int,
-        default=15,
-        help="Minimum negation clauses (default: 15)",
+        help="最多处理的合同段落数（0 = 全部 510 份；默认全部）",
     )
     args = parser.parse_args()
 
-    # --all shortcut mode.
+    # --all 快捷模式。
     if args.all:
         args.selection_mode = "all"
         args.max_contexts = 0
@@ -156,36 +133,24 @@ def main() -> None:
         if args.output == "data/processed/lexspec_100.jsonl":
             args.output = "data/processed/lexspec_corpus.jsonl"
 
-    # ---- Initialization ----
+    # ---- 初始化 ----
     import logging as _logging
     setup_logging(log_dir="outputs", level=_logging.INFO)
 
+    constraints = load_constraints_config(args.constraints)
+    sampling_cfg = get_corpus_sampling_config(constraints, args.constraints)
+    validation_cfg = get_validation_thresholds(constraints, args.constraints)
+    long_distance_mdd = validation_cfg["long_distance_mdd"]
+
+    default_target = sampling_cfg["target_count_default"]
+    if args.target_count is None:
+        args.target_count = default_target
+
     logger.info("Loading model config: %s", args.config)
-    config_path = Path(args.config)
-    if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as fh:
-            config = yaml.safe_load(fh)
-    else:
-        logger.warning("Config file '%s' not found -- using Stanza defaults", args.config)
-        config = {}
+    model_config = 加载模型配置(args.config)
+    nlp_parser = 构建Stanza解析器(model_config, args.config)
 
-    stanza_cfg = config.get("stanza", {}) if config else {}
-    stanza_lang = stanza_cfg.get("lang", "en")
-    stanza_processors = stanza_cfg.get("processors", "tokenize,mwt,pos,lemma,depparse")
-    stanza_download = stanza_cfg.get("download_method", "REUSE_RESOURCES")
-
-    # ---- Initialize Stanza parser ----
-    logger.info(
-        "Initializing Stanza: lang=%s, processors=%s, download=%s",
-        stanza_lang, stanza_processors, stanza_download,
-    )
-    nlp_parser = StanzaParser(
-        lang=stanza_lang,
-        processors=stanza_processors,
-        download_method=stanza_download,
-    )
-
-    # ---- Load CUAD clauses ----
+    # ---- 加载 CUAD 条款 ----
     if args.source == "spans":
         clauses = load_cuad_spans(args.master_clauses_path)
         source_label = "cuad_v1_spans"
@@ -198,31 +163,32 @@ def main() -> None:
         clauses = split_into_clauses(nlp_parser, contexts, max_contexts=max_ctx)
         source_label = "cuad_v1_sentences"
 
-    # ---- Clause selection ----
+    # ---- 条款选择 ----
     if args.selection_mode == "all":
-        records, _ = build_clause_records(nlp_parser, clauses, source_label)
+        records, _ = build_clause_records(
+            nlp_parser, clauses, source_label, long_distance_mdd=long_distance_mdd,
+        )
         selected = select_all_clauses(records)
     else:
-        target = args.target_count if args.target_count > 0 else 100
+        target = args.target_count if args.target_count > 0 else default_target
+        phenomenon_quotas = get_phenomenon_quotas(constraints, target, args.constraints)
         selected = select_balanced_testset(
             parser=nlp_parser,
             clauses=clauses,
             target_count=target,
-            min_passive=args.min_passive,
-            min_conditional=args.min_conditional,
-            min_relative=args.min_relative,
-            min_long_distance=args.min_long_distance,
-            min_negation=args.min_negation,
+            phenomenon_quotas=phenomenon_quotas,
+            random_seed=sampling_cfg["random_seed"],
+            long_distance_mdd=long_distance_mdd,
             source_label=source_label,
         )
 
-    # ---- Save output ----
+    # ---- 保存输出 ----
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     write_jsonl(str(output_path), selected)
     logger.info("Saved %d clauses to: %s", len(selected), output_path)
 
-    # ---- Print selection statistics ----
+    # ---- 打印选择统计 ----
     print("\n" + "=" * 60)
     print("LexSpec Corpus Construction Complete")
     print("=" * 60)
@@ -243,7 +209,7 @@ def main() -> None:
         print(f"  {phen:<23s} {count:>6d}  {pct:>9.1f}%")
     print()
 
-    # Show filtered definition clause count in full mode.
+    # 全量模式下显示已过滤的定义条款数量。
     if args.selection_mode == "all":
         defs_filtered = sum(
             1 for r in records if r["phenomena"].get("is_definition", False)
@@ -252,7 +218,7 @@ def main() -> None:
             print(f"  (Filtered {defs_filtered} definition clauses)")
     print()
 
-    # Multi-phenomenon overlap statistics (exclude is_definition).
+    # 多现象重叠统计（排除 is_definition）。
     print("Multi-phenomenon clause distribution:")
     multi = Counter(
         sum(1 for k, v in r["phenomena"].items() if k != "is_definition" and v)

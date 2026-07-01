@@ -1,11 +1,11 @@
 """
-7-Step Validation Algorithm — Standalone Implementation
+七步校验算法 —— 独立实现
 ========================================================
-Extracted from ConstraintValidator.validate() to keep file size manageable.
+从 ConstraintValidator.validate() 提取以保持文件体积可控。
 
-This module contains the core orchestration logic of the 7-step algorithm.
-The ConstraintValidator class delegates to this function, keeping the class
-itself focused on component lifecycle and configuration.
+本模块包含七步算法的核心编排逻辑。
+ConstraintValidator 类委托给此函数，类本身专注于
+组件生命周期与配置。
 """
 
 from __future__ import annotations
@@ -48,31 +48,28 @@ def run_validation(
     text: str,
     tree: Optional[DependencyTree] = None,
 ) -> ValidationResult:
-    """Run the complete 7-step constraint validation algorithm.
+    """运行完整的七步约束校验算法。
 
-    This is the main entry point for all validation. It orchestrates
-    the 7-step pipeline and produces a ValidationResult with status,
-    evidence, corrections, and feedback.
+    所有校验的主入口。编排七步流水线并产出含状态、
+    证据、修正与反馈的 ValidationResult。
 
-    If `tree` is None, the text is parsed internally via StanzaParser.
-    For batch processing, pre-parse the text and pass the tree to
-    avoid redundant Stanza calls.
+    若 `tree` 为 None，通过 StanzaParser 内部解析文本。
+    批处理时预先解析并传入 tree，以避免重复 Stanza 调用。
 
-    Args:
-        validator: ConstraintValidator instance providing parser access
-                   and component dependencies.
-        triplet: LLM-extracted legal triplet to validate.
-        text: Original contract clause text (exact input sent to LLM).
-        tree: Pre-parsed dependency tree. Parsed from text if None.
+    参数：
+        validator: 提供解析器访问与组件依赖的 ConstraintValidator 实例。
+        triplet: 待校验的大语言模型抽取法律三元组。
+        text: 原始合同从句文本（发送给大语言模型的精确输入）。
+        tree: 预解析依存树。为 None 时从 text 解析。
 
-    Returns:
-        ValidationResult with full validation details.
+    返回：
+        含完整校验详情的 ValidationResult。
 
-    Raises:
-        ValueError: If parsing fails (empty text, no sentences produced).
-        RuntimeError: If Stanza is not initialized and parser is None.
+    抛出：
+        ValueError: 解析失败（空文本、未产生句子）时。
+        RuntimeError: Stanza 未初始化且 parser 为 None 时。
     """
-    # Ensure we have a parse tree.
+    # 确保有解析树。
     if tree is None:
         logger.debug("No pre-parsed tree provided — parsing text")
         tree = validator.parser.parse(text)
@@ -83,7 +80,7 @@ def run_validation(
             "The input text may be empty or unparseable."
         )
 
-    # Accumulators for the 7-step algorithm.
+    # 七步算法的累加器。
     corrections: List[FieldCorrection] = []
     feedback_parts: List[str] = []
     ud_subject: Optional[Token] = None
@@ -101,11 +98,11 @@ def run_validation(
         text[:100] + "..." if len(text) > 100 else text,
     )
 
-    # ---- Step 1: Locate the root predicate ----
+    # ---- 步骤 1：定位根谓词 ----
     predicate_token = step1_find_predicate(tree)
     if predicate_token is None:
-        # Cannot validate without a root predicate.
-        # The sentence may be fragmentary or the parse failed.
+        # 无根谓词则无法校验。
+        # 句子可能残缺或解析失败。
         logger.warning("No root predicate found in tree — cannot validate")
         return ValidationResult(
             status=ValidationStatus.REFLEXION_REQUIRED,
@@ -128,14 +125,14 @@ def run_validation(
         predicate_token.text, predicate_lemma, predicate_idx,
     )
 
-    # ---- Step 2: Detect voice; restore semantic arguments ----
+    # ---- 步骤 2：检测语态；恢复语义论元 ----
     is_passive_detected, raw_ud_subject, raw_ud_object = step2_detect_voice(
         tree, predicate_idx
     )
 
-    # In passive voice, raw_ud_subject = obl:agent (semantic agent),
-    # raw_ud_object = nsubj:pass (semantic patient).
-    # In active voice, raw_ud_subject = nsubj, raw_ud_object = obj.
+    # 被动语态：raw_ud_subject = obl:agent（语义施事），
+    # raw_ud_object = nsubj:pass（语义受事）。
+    # 主动语态：raw_ud_subject = nsubj，raw_ud_object = obj。
     ud_subject = raw_ud_subject
     ud_object = raw_ud_object
 
@@ -146,7 +143,7 @@ def run_validation(
         ud_object.text if ud_object else "None",
     )
 
-    # ---- Step 3: Validate subject ----
+    # ---- 步骤 3：校验主语 ----
     subject_valid = step3_validate_subject(
         triplet.subject.text, ud_subject, corrections, feedback_parts
     )
@@ -155,7 +152,7 @@ def run_validation(
     else:
         logger.info("Step 3: Subject needs correction")
 
-    # ---- Step 4: Validate object ----
+    # ---- 步骤 4：校验宾语 ----
     object_valid = step4_validate_object(
         triplet.action.object, ud_object, corrections, feedback_parts
     )
@@ -164,7 +161,7 @@ def run_validation(
     else:
         logger.info("Step 4: Object needs correction")
 
-    # ---- Step 5: Validate condition ----
+    # ---- 步骤 5：校验条件 ----
     condition_span = step5_validate_condition(
         triplet, tree, predicate_idx,
         validator.condition_extractor, validator._condition_overlap,
@@ -179,14 +176,14 @@ def run_validation(
     else:
         logger.info("Step 5: No UD condition detected")
 
-    # ---- Step 6: Validate modality/role ----
+    # ---- 步骤 6：校验情态/角色 ----
     role_valid = step6_validate_role(
         triplet.subject.role, tree, predicate_idx,
         predicate_lemma,
         validator.polarity_detector, corrections, feedback_parts,
     )
 
-    # Extract modality for evidence (even if role is valid).
+    # 提取情态供证据使用（即使角色有效）。
     modality_aux, polarity = validator.polarity_detector.detect_modality(
         tree, predicate_idx
     )
@@ -199,11 +196,11 @@ def run_validation(
     else:
         logger.info("Step 6: Role needs correction")
 
-    # ---- Step 7: Determine output status ----
+    # ---- 步骤 7：确定输出状态 ----
     status = step7_determine_status(corrections)
     logger.info("Step 7: Final status = %s", status.value)
 
-    # ---- Build the ValidationResult ----
+    # ---- 构建 ValidationResult ----
     evidence = build_linguistic_evidence(
         tree=tree,
         predicate_idx=predicate_idx,

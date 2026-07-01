@@ -1,51 +1,44 @@
 # =============================================================================
-# LexSpec: Constraint Rules and Validation Configuration
+# LexSpec：约束规则与验证配置
 # =============================================================================
 #
-# Purpose:
-#   This file defines the complete set of syntactic, semantic, and structural
-#   constraints used by the LexSpec pipeline.  These constraints serve three
-#   roles:
+# 用途：
+#   本文件定义 LexSpec 流水线使用的完整句法、语义与结构约束集合。这些约束承担三种角色：
 #
-#   1. **Extraction guidance**: The constraint rules are translated into
-#      structured information appended to the LLM prompt (in the constrained
-#      extraction variant), helping the model ground its predictions in
-#      dependency-parse evidence.
+#   1. **抽取引导**：约束规则被转换为结构化信息并追加到 LLM 提示词中（在约束抽取变体中），
+#      帮助模型将预测建立在依存句法分析证据之上。
 #
-#   2. **Validation**: After extraction, the validator checks whether the
-#      LLM output respects the dependency-parse structure.  Mismatches
-#      trigger Reflexion correction and are recorded as error categories.
+#   2. **验证**：抽取完成后，验证器检查 LLM 输出是否尊重依存句法结构。不匹配会触发
+#      Reflexion 纠错，并记录为错误类别。
 #
-#   3. **Test set construction**: The phenomenon thresholds control how
-#      sentences are sampled from the corpus to build a balanced test set
-#      covering diverse syntactic phenomena.
+#   3. **测试集构建**：现象阈值控制如何从语料库中采样句子，以构建覆盖多样句法现象的
+#      平衡测试集。
 #
-# Sections:
-#   1. ud_relations          — Universal Dependencies relation inventory.
-#   2. condition_markers     — Lexical markers for conditional clauses.
-#   3. modality_rules        — Deontic modality classification rules.
-#   4. validation            — Thresholds for evaluating extraction quality.
-#   5. f1_weights            — Component weights for the weighted F1 metric.
-#   6. normalization         — Text normalization rules for comparison.
-#   7. phenomenon_thresholds — Test set sampling thresholds.
+# 章节：
+#   1. ud_relations          — Universal Dependencies 关系清单。
+#   2. condition_markers     — 条件从句的词汇标记。
+#   3. modality_rules        — 道义情态分类规则。
+#   4. validation            — 抽取质量评估阈值。
+#   5. f1_weights            — 加权 F1 指标的各分量权重。
+#   6. normalization         — 比较用的文本规范化规则。
+#   7. phenomenon_thresholds — 测试集采样阈值。
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# 1. Universal Dependencies Relation Inventory
+# 1. Universal Dependencies 关系清单
 # ---------------------------------------------------------------------------
-# These are the UD v2 dependency relations that the LexSpec pipeline
-# inspects during extraction and validation.  Each relation is mapped to
-# its syntactic function with a brief description and example.
+# 这些是 LexSpec 流水线在抽取与验证阶段检查的 UD v2 依存关系。每种关系映射到
+# 其句法功能，并附有简要说明与示例。
 #
-# The mapping is used to:
-#   - Extract candidate subjects and objects from the dependency tree.
-#   - Detect passive voice (nsubj:pass + aux:pass).
-#   - Trace condition boundaries (advcl + mark).
-#   - Identify negation (neg) and modality (aux).
-#   - Handle relative clauses (acl:relcl) embedding predicates.
+# 该映射用于：
+#   - 从依存树中抽取候选主语与宾语。
+#   - 检测被动语态（nsubj:pass + aux:pass）。
+#   - 追踪条件边界（advcl + mark）。
+#   - 识别否定（neg）与情态（aux）。
+#   - 处理关系从句（acl:relcl）中嵌入的谓词。
 ud_relations:
 
-  # --- Subject relations ---
+  # --- 主语关系 ---
   active_subject:
     relation: "nsubj"
     description: >
@@ -74,7 +67,7 @@ ud_relations:
       This is the logical SUBJECT (the doer).  In "The Price shall be
       paid by the Buyer", "Buyer" is obl:agent of "paid".
 
-  # --- Clause relations ---
+  # --- 从句关系 ---
   advcl:
     relation: "advcl"
     description: >
@@ -90,7 +83,7 @@ ud_relations:
       The head is the verb of the subordinate clause.  Used to identify
       condition types (trigger, temporal, exception).
 
-  # --- Negation and modality ---
+  # --- 否定与情态 ---
   neg:
     relation: "neg"
     description: >
@@ -112,7 +105,7 @@ ud_relations:
       mark passive voice.  Presence of aux:pass together with nsubj:pass
       confirms a passive construction.
 
-  # --- Relative clauses ---
+  # --- 关系从句 ---
   acl_relcl:
     relation: "acl:relcl"
     description: >
@@ -122,22 +115,18 @@ ud_relations:
       Example: "the Seller [who shall deliver the Goods]".
 
 # ---------------------------------------------------------------------------
-# 2. Condition Markers
+# 2. 条件标记
 # ---------------------------------------------------------------------------
-# Legal contracts employ a variety of subordinating constructions to express
-# conditional relationships.  These markers are organized into three semantic
-# categories:
+# 法律合同使用多种从属结构表达条件关系。这些标记按三种语义类别组织：
 #
-#   trigger:   The condition must occur for the main clause to take effect.
-#   temporal:  The main clause takes effect at/after a specified time/event.
-#   exception: The main clause applies unless the condition holds.
+#   trigger:   主句生效须满足该条件。
+#   temporal:  主句在指定时间/事件发生时或之后生效。
+#   exception: 主句适用，除非该条件成立（此时主句失效）。
 #
-# Each category has a list of `mark_words` — the lemmatized forms of
-# subordinating conjunctions and phrases that signal that category.
+# 每个类别包含 `mark_words` 列表——标示该类别的小句从属连词与短语的词元形式。
 condition_markers:
 
-  # trigger: Classic conditional markers.  The main clause obligation,
-  # permission, or prohibition is contingent on the condition being met.
+  # trigger：经典条件标记。主句的义务、许可或禁止取决于条件是否满足。
   trigger:
     description: >
       Event-driven conditions: the main clause applies IF the condition
@@ -150,8 +139,7 @@ condition_markers:
       - "on condition that"
       - "so long as"
 
-  # temporal: Time-driven conditions.  The main clause takes effect WHEN
-  # a specified temporal milestone is reached.
+  # temporal：时间驱动条件。主句在达到指定时间里程碑时生效。
   temporal:
     description: >
       Time-driven conditions: the main clause applies WHEN the temporal
@@ -165,8 +153,7 @@ condition_markers:
       - "as soon as"
       - "from the date"
 
-  # exception: Limiting conditions.  The main clause applies UNLESS the
-  # exception condition is met, in which case the main clause is voided.
+  # exception：限制性条件。主句适用，除非例外条件成立，此时主句义务失效。
   exception:
     description: >
       Exception conditions: the main clause applies UNLESS the exception
@@ -181,20 +168,17 @@ condition_markers:
       - "save as"
 
 # ---------------------------------------------------------------------------
-# 3. Modality Rules
+# 3. 情态规则
 # ---------------------------------------------------------------------------
-# Legal contracts use modal auxiliaries to express deontic meanings:
-# obligations, permissions, and prohibitions.  These rules map each
-# deontic role (obligor, right_holder, prohibited_party) to its defining
-# auxiliary verbs and whether negation is expected.
+# 法律合同使用情态助动词表达道义含义：义务、许可与禁止。这些规则将各道义角色
+# （obligor、right_holder、prohibited_party）映射到其定义性助动词及是否预期否定。
 #
-# The modality classifier uses these rules to:
-#   - Predict the expected subject role from the auxiliary verb.
-#   - Detect role mismatches during validation (see error_hints.role_mismatch).
+# 情态分类器使用这些规则来：
+#   - 根据助动词预测预期主语角色。
+#   - 在验证阶段检测角色不匹配（见 error_hints.role_mismatch）。
 modality_rules:
 
-  # obligor: The party who bears the obligation.  Typically the subject of
-  # a clause with "shall", "must", or an active obligation verb.
+  # obligor：承担义务的当事方。通常是含 "shall"、"must" 或主动义务动词的从句主语。
   obligor:
     description: >
       The party required to perform the action.  Associated with mandatory
@@ -202,11 +186,10 @@ modality_rules:
     aux_verbs:
       - "shall"
       - "must"
-      - "will"       # "will" in contracts often expresses obligation, not future
-    negated: false    # Negation converts obligor → prohibited_party
+      - "will"       # 合同中 "will" 常表义务而非将来时
+    negated: false    # 否定将 obligor 转为 prohibited_party
 
-  # right_holder: The party who benefits from a permission or entitlement.
-  # Typically the subject of a clause with "may" or "is entitled to".
+  # right_holder：享有许可或权利的当事方。通常是含 "may" 或 "is entitled to" 的从句主语。
   right_holder:
     description: >
       The party who holds a right, permission, or entitlement.  Associated
@@ -214,11 +197,10 @@ modality_rules:
     aux_verbs:
       - "may"
       - "can"
-    negated: false    # "may not" converts to prohibition
+    negated: false    # "may not" 转为禁止
 
-  # prohibited_party: The party forbidden from acting.  Typically the
-  # subject of a negated obligation ("shall not") or negated permission
-  # ("may not").
+  # prohibited_party：被禁止行动的当事方。通常是否定义务（"shall not"）或否定许可
+  # （"may not"）的从句主语。
   prohibited_party:
     description: >
       The party forbidden from performing the action.  Associated with
@@ -228,138 +210,139 @@ modality_rules:
       - "shall"
       - "may"
       - "must"
-    negated: true     # Prohibition requires negation of a deontic auxiliary
+    negated: true     # 禁止须对道义助动词进行否定
 
 # ---------------------------------------------------------------------------
-# 4. Validation Thresholds
+# 4. 验证阈值
 # ---------------------------------------------------------------------------
-# During validation, extracted text spans are compared against dependency-
-# parse-derived candidates using fuzzy matching.  These thresholds control
-# when a match is accepted vs. flagged as an error.
+# 验证时，将抽取的文本片段与依存句法派生的候选进行模糊匹配比较。这些阈值控制
+# 何时接受匹配、何时标记为错误。
 validation:
 
-  # condition_overlap: Minimum Jaccard similarity (token set intersection
-  # over union) between the extracted condition text and the dependency-
-  # parse-derived condition span.  Values below this threshold trigger
-  # a condition_boundary error hint.
+  # condition_overlap：抽取的条件文本与依存句法派生条件片段之间的最小 Jaccard
+  # 相似度（词元集合交并比）。低于此阈值将触发 condition_boundary 错误提示。
   condition_overlap: 0.5
 
-  # subject_match: Minimum fuzzy-match score (token-based, after
-  # normalization) between the extracted subject text and the candidate
-  # noun phrase from the dependency parse.  Values below this threshold
-  # may trigger subject-related error hints (passive_subject, role_mismatch).
+  # subject_match：抽取的主语文本与依存句法候选名词短语之间的最小模糊匹配分数
+  # （词元级，规范化后）。低于此阈值可能触发主语相关错误提示（passive_subject、role_mismatch）。
   subject_match: 0.8
 
-  # object_match: Minimum fuzzy-match score between the extracted object
-  # text and the candidate from the dependency parse.  Values below this
-  # threshold may trigger object-related error hints (passive_object,
-  # long_distance_object).
+  # object_match：抽取的宾语文本与依存句法候选之间的最小模糊匹配分数。低于此阈值
+  # 可能触发宾语相关错误提示（passive_object、long_distance_object）。
   object_match: 0.8
 
+  # long_distance_tokens：根谓词与主语/宾语论元之间的最小词级依存距离，超过则
+  # 将错误归类为长距离（Reflexion 提示与评估错误分类）。
+  long_distance_tokens: 3
+
+  # long_distance_mdd：平均依存距离（MDD）超过此值时，在语料分层采样（现象检测）
+  # 中将该从句标记为存在长距离依存。
+  long_distance_mdd: 6.0
+
 # ---------------------------------------------------------------------------
-# 5. Weighted F1 Component Weights
+# 5. 加权 F1 分量权重
 # ---------------------------------------------------------------------------
-# The LexSpec evaluation metric is a weighted F1 score that decomposes
-# extraction quality into five components.  Each component contributes
-# to the final score according to its weight.
+# LexSpec 评估指标为加权 F1，将抽取质量分解为五个分量。各分量按权重计入最终得分。
 #
-# The weights reflect the relative importance of each component for legal
-# information extraction:
-#   - Subject text accuracy is most critical (misidentifying the obligated
-#     party has severe downstream consequences).
-#   - Predicate and object are equally important for action identification.
-#   - Condition extraction is somewhat less critical but still significant.
-#   - Subject role classification provides a semantic correctness check.
+# 权重反映各分量对法律信息抽取的相对重要性：
+#   - 主语文本准确性最为关键（误认义务方对下游影响严重）。
+#   - 谓词与宾语对动作识别同等重要。
+#   - 条件抽取略次但仍显著。
+#   - 主语角色分类提供语义正确性检查。
 #
-# All weights must sum to 1.0.
+# 所有权重之和须为 1.0。
 f1_weights:
 
-  # subject_text: Weight for exact-match / fuzzy-match accuracy of the
-  # subject's text span.  This is the highest-weighted component because
-  # party identification is the most consequential task in contract analysis.
+  # subject_text：主语文本片段精确/模糊匹配准确率的权重。权重最高，因当事方识别
+  # 是合同分析中最具后果的任务。
   subject_text: 0.35
 
-  # subject_role: Weight for correct classification of the subject's
-  # semantic role (obligor / right_holder / prohibited_party / agent).
-  # Lower weight because role labels have inherent ambiguity in edge cases.
+  # subject_role：主语语义角色（obligor / right_holder / prohibited_party / agent）
+  # 分类正确率的权重。权重较低，因边缘情形下角色标签存在固有歧义。
   subject_role: 0.10
 
-  # predicate: Weight for correct identification of the predicate verb
-  # phrase.  Includes both the main verb and any auxiliaries.
+  # predicate：谓词动词短语正确识别的权重。含主要动词及助动词。
   predicate: 0.20
 
-  # object: Weight for correct extraction of the object text span.
-  # Symmetric with predicate weight — identifying WHAT must be done
-  # is as important as identifying WHO must do it.
+  # object：宾语文本片段正确抽取的权重。与谓词权重对称——识别须做什么与
+  # 识别谁须做同样重要。
   object: 0.20
 
-  # condition: Weight for correct extraction of condition clauses.
-  # Slightly lower because not every predicate has a condition.
+  # condition：条件从句正确抽取的权重。略低，因并非每个谓词都有条件。
   condition: 0.15
 
 # ---------------------------------------------------------------------------
-# 6. Text Normalization Rules
+# 6. 文本规范化规则
 # ---------------------------------------------------------------------------
-# Before comparing extracted text spans with gold-standard or dependency-
-# parse-derived spans, both sides are normalized.  Normalization eliminates
-# superficial differences that do not affect semantic correctness.
+# 在将抽取文本与金标准或依存句法派生片段比较前，对双方进行规范化。规范化消除
+# 不影响语义正确性的表面差异。
 #
-# Each rule is a boolean flag.  All rules are applied in the order listed
-# when computing fuzzy match scores.
+# 每条规则为布尔标志。计算模糊匹配分数时按所列顺序应用全部规则。
 normalization:
 
-  # remove_articles: Strip leading articles ("a", "an", "the") from noun
-  # phrases.  "the Buyer" and "Buyer" should match.
+  # remove_articles：剥离名词短语前导冠词（"a"、"an"、"the"）。"the Buyer" 与 "Buyer" 应匹配。
   remove_articles: true
 
-  # lemmatize: Reduce words to their dictionary form using Stanza's
-  # lemmatizer.  "delivers" and "deliver" should match.
+  # lemmatize：使用 Stanza 词形还原器将词还原为词典形式。"delivers" 与 "deliver" 应匹配。
   lemmatize: true
 
-  # number_normalization: Convert written numbers to digits and vice versa
-  # for comparison.  "five days" and "5 days" should match.
+  # number_normalization：为比较将书面数字与阿拉伯数字互转。"five days" 与 "5 days" 应匹配。
   number_normalization: true
 
-  # party_aliases: Expand or normalize party reference aliases defined
-  # in the contract's preamble.  "the Company" and "Acme Corp" should
-  # match if "Company" is defined as "Acme Corp" in the contract.
-  party_aliases: true
+  # use_party_aliases：为 true 时，在评估与标注一致性中对文本规范化应用 party_alias_mappings。
+  use_party_aliases: true
 
 # ---------------------------------------------------------------------------
-# 7. Phenomenon Thresholds for Test Set Construction
+# 6b. 当事方别名映射
 # ---------------------------------------------------------------------------
-# The test set is constructed by stratified sampling from the corpus to
-# ensure balanced coverage of key syntactic phenomena.  Each threshold
-# defines the minimum proportion of test sentences that must exhibit a
-# given phenomenon.
+# 规范当事方名称到表面形式别名的映射。在 normalization.use_party_aliases 为 true 时使用。
+# 可按语料需要扩展合同特定定义。
+party_alias_mappings:
+
+  Seller:
+    - "the seller"
+    - "company"
+    - "vendor"
+
+  Buyer:
+    - "the buyer"
+    - "purchaser"
+
+# ---------------------------------------------------------------------------
+# 7. 语料采样默认值
+# ---------------------------------------------------------------------------
+# 分层测试集构建（步骤 01）的默认参数。各现象最小数量由 phenomenon_thresholds
+# 比例 × target_count_default（向上取整）得出。
+corpus_sampling:
+  target_count_default: 100
+  random_seed: 42
+
+# ---------------------------------------------------------------------------
+# 8. 测试集构建的现象阈值
+# ---------------------------------------------------------------------------
+# 测试集通过语料库分层采样构建，确保关键句法现象的平衡覆盖。各阈值定义须体现
+# 给定现象的测试句最小比例。
 #
-# The sampler iterates over the corpus, classifying each sentence by its
-# dependency-parse features, and fills phenomenon quotas until all
-# thresholds are met.  Remaining slots are filled by random sampling.
+# 采样器遍历语料，按依存句法特征分类每句，填满现象配额直至满足全部阈值。
+# 剩余名额随机采样填充。
 #
-# These thresholds are set based on observed phenomenon frequencies in
-# the CUAD and ContractNLI corpora, adjusted to ensure each category has
-# at least ~20 examples for meaningful statistical comparison.
+# 阈值基于 CUAD 与 ContractNLI 语料中观察到的现象频率设定，调整以确保各类至少
+# 约 20 例以供有意义的统计比较。
 phenomenon_thresholds:
 
-  # passive: Minimum proportion of sentences containing passive voice
-  # constructions (detected via aux:pass + nsubj:pass dependency relations).
+  # passive：含被动语态构造的句子最小比例（通过 aux:pass + nsubj:pass 依存关系检测）。
   passive: 0.20
 
-  # conditional: Minimum proportion of sentences containing conditional
-  # clauses (detected via advcl + mark with condition_markers).
+  # conditional：含条件从句的句子最小比例（通过 advcl + mark 与 condition_markers 检测）。
   conditional: 0.25
 
-  # relative: Minimum proportion of sentences containing relative clauses
-  # (detected via acl:relcl dependency relation).
+  # relative：含关系从句的句子最小比例（通过 acl:relcl 依存关系检测）。
   relative: 0.15
 
-  # long_distance: Minimum proportion of sentences where a predicate and
-  # its object are separated by more than 5 intervening tokens.  These
-  # test the model's ability to handle long-distance dependencies.
+  # long_distance：平均依存距离高于 validation.long_distance_mdd 的句子最小比例
+  # （见语料现象检测）。测试长距离依存处理。
   long_distance: 0.15
 
-  # negation: Minimum proportion of sentences containing negation markers
-  # (detected via neg dependency relation).  Negation is critical for
-  # distinguishing obligations from prohibitions.
+  # negation：含否定标记的句子最小比例（通过 neg 依存关系检测）。否定对区分
+  # 义务与禁止至关重要。
   negation: 0.15

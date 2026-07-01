@@ -1,8 +1,7 @@
 """
-Data loading utilities shared across evaluation and error analysis steps.
+评估与错误分析步骤共用的数据加载工具。
 
-Provides gold triplet loading, prediction deserialization, Stanza config
-loading, and UD tree parsing for test sets.
+提供金标三元组加载、预测反序列化、Stanza 配置加载及测试集 UD 树解析。
 """
 
 from __future__ import annotations
@@ -22,17 +21,16 @@ logger = get_logger(__name__)
 
 
 def load_predictions(file_path: str) -> List[Dict]:
-    """Load predictions from a JSONL file.
+    """从 JSONL 文件加载预测结果。
 
-    Returns an empty list (with warning) if the file does not exist,
-    so that evaluation can continue without crashing on a missing
-    experiment output.
+    若文件不存在则返回空列表（并警告），
+    以便缺少某实验输出时评估仍可继续而不崩溃。
 
-    Args:
-        file_path:  Path to the predictions JSONL file.
+    参数:
+        file_path: 预测 JSONL 文件路径。
 
-    Returns:
-        List of prediction dicts.
+    返回:
+        预测字典列表。
     """
     path = Path(file_path)
     if not path.exists():
@@ -44,16 +42,16 @@ def load_predictions(file_path: str) -> List[Dict]:
 
 
 def load_gold_triplets(file_path: str) -> List[LegalTriplet]:
-    """Load gold-standard LegalTriplets from a JSONL file.
+    """从 JSONL 文件加载金标准 LegalTriplet。
 
-    If the file does not exist, prints a prominent warning and returns
-    an empty list.  The caller must handle the empty-gold case gracefully.
+    若文件不存在，打印醒目警告并返回空列表。
+    调用方须妥善处理金标为空的情况。
 
-    Args:
-        file_path:  Path to gold triplets JSONL.
+    参数:
+        file_path: 金标三元组 JSONL 路径。
 
-    Returns:
-        List of LegalTriplet objects, or empty list if file is missing.
+    返回:
+        LegalTriplet 对象列表；文件缺失时为空列表。
     """
     path = Path(file_path)
     if not path.exists():
@@ -71,16 +69,16 @@ def load_gold_triplets(file_path: str) -> List[LegalTriplet]:
 
 
 def load_predictions_as_triplets(predictions: List[Dict]) -> List[LegalTriplet]:
-    """Convert prediction dicts (from extract steps) into LegalTriplet objects.
+    """将预测字典（来自抽取步骤）转换为 LegalTriplet 对象。
 
-    Each prediction dict has a ``triplet`` key containing the serialized
-    LegalTriplet.  Deserializes back into a Pydantic model.
+    每个预测字典含 ``triplet`` 键，存放序列化后的 LegalTriplet。
+    反序列化为 Pydantic 模型。
 
-    Args:
-        predictions:  List of prediction dicts.
+    参数:
+        predictions: 预测字典列表。
 
-    Returns:
-        List of LegalTriplet objects.
+    返回:
+        LegalTriplet 对象列表。
     """
     triplets: List[LegalTriplet] = []
     for pred in predictions:
@@ -101,7 +99,7 @@ def load_predictions_as_triplets(predictions: List[Dict]) -> List[LegalTriplet]:
 
 
 def _load_stanza_config(config_path: str) -> Dict[str, Any]:
-    """Load Stanza configuration from model.yaml."""
+    """从 model.yaml 加载 Stanza 配置。"""
     config_file = Path(config_path)
     if config_file.exists():
         with open(config_file, "r", encoding="utf-8") as fh:
@@ -115,26 +113,25 @@ def parse_trees_for_testset(
     config_path: str,
     max_clauses: Optional[int] = None,
 ) -> List[DependencyTree]:
-    """Parse UD dependency trees for all clauses in the test set.
+    """为测试集中全部子句解析 UD 依存树。
 
-    The trees are needed for linguistic metrics and error analysis to
-    determine primary error categories (e.g., detecting passive voice,
-    condition clauses).
+    语言学指标与错误分析需要树结构以确定主错误类别
+    （如检测被动语态、条件从句）。
 
-    Args:
-        testset_path:  Path to lexspec_100.jsonl.
-        config_path:   Path to model.yaml (for Stanza config).
-        max_clauses:   Optional cap on number of clauses to parse.
+    参数:
+        testset_path: lexspec_100.jsonl 路径。
+        config_path: model.yaml 路径（Stanza 配置）。
+        max_clauses: 可选，限制解析子句数量。
 
-    Returns:
-        List of DependencyTree objects, 1:1 with test set clauses.
+    返回:
+        DependencyTree 对象列表，与测试集子句 1:1 对应。
     """
     testset = read_jsonl(str(testset_path)) if Path(testset_path).exists() else []
     if not testset:
         logger.warning("Test set not found -- no UD trees available.")
         return []
 
-    # Load Stanza config.
+    # 加载 Stanza 配置。
     config_file = Path(config_path)
     stanza_cfg: Dict[str, Any] = {}
     if config_file.exists():

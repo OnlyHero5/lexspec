@@ -57,12 +57,12 @@ def 运行基线抽取(
 
     成功标准: 抽取出的三元组同时包含非空的 subject.text 和 action.predicate。
 
-    Args:
+    参数:
         test_clauses: 测试集条款字典列表（每项含 clause_id 和 text）。
         config_path: 模型配置文件路径。
         prompts_path: 提示词配置文件路径。
 
-    Returns:
+    返回:
         结果字典列表，每条款一项，包含 clause_id / text / triplet /
         extraction_time_s / success。
     """

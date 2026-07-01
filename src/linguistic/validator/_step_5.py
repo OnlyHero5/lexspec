@@ -1,7 +1,7 @@
 """
-Validation Step 5: Condition Validation.
+校验步骤 5：条件校验。
 
-Compares LLM-extracted condition against UD condition spans using IoU overlap.
+使用 IoU 重叠将大语言模型抽取的条件与 UD 条件跨度比对。
 """
 
 from __future__ import annotations
@@ -30,43 +30,41 @@ def step5_validate_condition(
     corrections: List[FieldCorrection],
     feedback_parts: List[str],
 ) -> Optional[ConditionSpan]:
-    """Step 5: Validate the condition field.
+    """步骤 5：校验条件字段。
 
-    Condition validation is the most complex step because it involves
-    span boundary comparison, not just token matching. The key issues:
+    条件校验是最复杂的步骤，因涉及跨度边界比对，
+    而非仅词元匹配。主要问题：
 
-    1. Condition Omission: UD finds a condition clause but the LLM
-       marked condition.type = NONE. The LLM missed the condition.
+    1. 条件遗漏：UD 找到条件从句但大语言模型
+       将 condition.type 标为 NONE。大语言模型遗漏条件。
 
-    2. Condition Over-extraction: The LLM marked a condition where
-       UD finds none. The LLM hallucinated a condition or extracted
-       main clause content as a condition.
+    2. 条件过度抽取：大语言模型标有条件但 UD 未找到。
+       大语言模型幻觉条件或将主句内容当作条件。
 
-    3. Condition Boundary Error: Both UD and LLM find a condition
-       but their spans differ significantly (IoU below threshold).
-       The LLM may have included main clause tokens or truncated
-       the condition clause.
+    3. 条件边界错误：UD 与大语言模型均找到条件
+       但跨度差异显著（IoU 低于阈值）。
+       大语言模型可能包含主句词元或截断条件从句。
 
-    4. Condition Type Error: Both find a condition but the LLM
-       classified it incorrectly (e.g., TEMPORAL vs TRIGGER).
+    4. 条件类型错误：双方均找到条件但大语言模型
+       分类错误（如 TEMPORAL 与 TRIGGER）。
 
-    Strategy:
-      - Extract UD condition spans via ConditionExtractor.
-      - Compare with LLM condition text using token overlap (IoU).
-      - If IoU >= threshold: accept (minor boundary differences OK).
-      - If IoU < threshold: add correction or trigger Reflexion.
+    策略：
+      - 通过 ConditionExtractor 提取 UD 条件跨度。
+      - 使用词元重叠（IoU）与大语言模型条件文本比对。
+      - IoU >= 阈值：接受（轻微边界差异可接受）。
+      - IoU < 阈值：添加修正或触发 Reflexion。
 
-    Args:
-        triplet: The LLM-extracted triplet.
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the predicate.
-        condition_extractor: ConditionExtractor instance.
-        condition_overlap: Minimum IoU threshold for condition span match.
-        corrections: List to append FieldCorrection objects to.
-        feedback_parts: List to append feedback strings to.
+    参数：
+        triplet: 大语言模型抽取的三元组。
+        tree: 依存树。
+        predicate_idx: 谓词的 1 基索引。
+        condition_extractor: ConditionExtractor 实例。
+        condition_overlap: 条件跨度匹配的最小 IoU 阈值。
+        corrections: 追加 FieldCorrection 的列表。
+        feedback_parts: 追加反馈字符串的列表。
 
-    Returns:
-        The UD ConditionSpan, or None if no condition was detected.
+    返回：
+        UD ConditionSpan，未检测到条件时返回 None。
     """
     llm_has_condition = (
         triplet.condition.text
@@ -74,14 +72,14 @@ def step5_validate_condition(
         and triplet.condition.type != ConditionType.NONE
     )
 
-    # Extract all UD condition spans for this predicate.
+    # 提取该谓词的全部 UD 条件跨度。
     ud_spans = condition_extractor.extract_all(tree, predicate_idx)
 
-    # Case 1: Neither LLM nor UD has a condition.
+    # 情况 1：大语言模型与 UD 均无条件。
     if not ud_spans and not llm_has_condition:
         return None
 
-    # Case 2: UD finds a condition but LLM missed it (omission).
+    # 情况 2：UD 找到条件但大语言模型遗漏（遗漏）。
     if ud_spans and not llm_has_condition:
         primary_span = ud_spans[0]
         feedback_parts.append(
@@ -109,12 +107,11 @@ def step5_validate_condition(
                 f"'{primary_span.mark_text}' -> {primary_span.condition_type.value}."
             ),
         ))
-        # Return the UD span so the evidence object can be populated.
-        # The status will be CORRECTED since we have UD evidence for
-        # both the condition text and type.
+        # 返回 UD 跨度以便填充证据对象。
+        # 因有 UD 证据，状态将为 CORRECTED。
         return primary_span
 
-    # Case 3: LLM has a condition but UD finds none (over-extraction).
+    # 情况 3：大语言模型有条件但 UD 未找到（过度抽取）。
     if not ud_spans and llm_has_condition:
         feedback_parts.append(
             f"Condition over-extraction: the LLM extracted condition "
@@ -122,17 +119,16 @@ def step5_validate_condition(
             f"found in the UD parse. The LLM may have extracted main "
             f"clause content as a condition."
         )
-        # Check if the LLM condition text overlaps with the main clause.
-        # This helps distinguish hallucination from extraction of
-        # a temporal adverb phrase that UD didn't tag as advcl.
+        # 检查大语言模型条件文本是否与主句重叠。
+        # 有助于区分幻觉与抽取 UD 未标为 advcl 的时间状语。
         correction_applied = False
         for token_idx in range(1, tree.token_count + 1):
             token = tree.get_token(token_idx)
             if token is None:
                 continue
             if token.text.lower() in triplet.condition.text.lower():
-                # The condition text contains main clause tokens.
-                # Likely over-extraction — remove the condition.
+                # 条件文本包含主句词元。
+                # 可能为过度抽取 —— 移除条件。
                 correction_applied = True
                 break
 
@@ -153,25 +149,24 @@ def step5_validate_condition(
                 corrected=ConditionType.NONE.value,
                 reason="No condition clause present in UD parse.",
             ))
-        # If no main clause overlap, the LLM may have extracted
-        # a genuine condition that UD failed to parse. We can't
-        # confidently correct this — it's a parse error.
-        # Still return None to signal "no UD condition found."
+        # 若无主句重叠，大语言模型可能抽取了
+        # UD 解析失败的真实条件。无法置信修正 —— 属解析错误。
+        # 仍返回 None 表示「未找到 UD 条件」。
         return None
 
-    # Case 4: Both LLM and UD have conditions — compare spans.
+    # 情况 4：大语言模型与 UD 均有条件 —— 比对跨度。
     if ud_spans and llm_has_condition:
         primary_span = ud_spans[0]
 
-        # Compute overlap between LLM condition text and UD span.
+        # 计算大语言模型条件文本与 UD 跨度的重叠。
         overlap = ConditionExtractor.compute_condition_overlap(
             triplet.condition.text, primary_span, tree
         )
 
         if overlap >= condition_overlap:
-            # Overlap is sufficient. Check if condition type matches.
+            # 重叠足够。检查条件类型是否匹配。
             if triplet.condition.type != primary_span.condition_type:
-                # Type mismatch — correct the type.
+                # 类型不匹配 —— 修正类型。
                 corrections.append(FieldCorrection(
                     field="condition.type",
                     original=triplet.condition.type.value,
@@ -183,10 +178,10 @@ def step5_validate_condition(
                         f"{triplet.condition.type.value}."
                     ),
                 ))
-            # Condition span is acceptable.
+            # 条件跨度可接受。
             return primary_span
 
-        # Overlap below threshold — boundary error.
+        # 重叠低于阈值 —— 边界错误。
         feedback_parts.append(
             f"Condition boundary error: LLM condition span "
             f"'{triplet.condition.text}' has low overlap (IoU={overlap:.2f}) "

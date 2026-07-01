@@ -1,8 +1,8 @@
 """
-Error reporting: distribution statistics, summary generation, and label helpers.
+错误报告：分布统计、摘要生成与标签辅助函数。
 
-Provides error_distribution_report(), generate_error_summary(), and utility
-functions for translating enum values to human-readable labels.
+提供 error_distribution_report()、generate_error_summary()，
+以及将枚举值映射为可读标签的工具函数。
 """
 
 from __future__ import annotations
@@ -18,29 +18,28 @@ logger = get_logger(__name__)
 
 
 def error_distribution_report(error_cases: List[ErrorCase]) -> Dict[str, Any]:
-    """Generate error distribution statistics from classified error cases.
+    """根据已分类错误案例生成分布统计。
 
-    Computes:
-      - Primary category distribution (linguistic phenomenon frequencies)
-      - Secondary category distribution (field error type frequencies)
-      - Cross-tabulation (primary x secondary joint frequencies)
-      - Most common error patterns (ranked by frequency)
+    计算：
+      - 主类别分布（语言学现象频次）
+      - 次类别分布（字段错误类型频次）
+      - 交叉表（主 × 次联合频次）
+      - 最常见错误模式（按频次排序）
 
-    These statistics are designed for inclusion in evaluation reports,
-    providing a quantitative breakdown of error types.
+    供评估报告使用的定量错误类型分解。
 
-    Args:
-        error_cases: List of ErrorCase objects from classify_errors().
+    参数:
+        error_cases: classify_errors() 返回的 ErrorCase 列表。
 
-    Returns:
-        Dict with keys:
-        - total_errors: int — total number of error cases.
-        - primary_distribution: Dict[str, int] — count per primary category.
-        - secondary_distribution: Dict[str, int] — count per secondary category.
-        - cross_tabulation: Dict[str, Dict[str, int]] — joint distribution.
-        - most_common_patterns: List[Tuple[str, int]] — top patterns sorted by frequency.
+    返回:
+        字典，键包括：
+        - total_errors: int — 错误案例总数。
+        - primary_distribution: Dict[str, int] — 各主类别计数。
+        - secondary_distribution: Dict[str, int] — 各次类别计数。
+        - cross_tabulation: Dict[str, Dict[str, int]] — 联合分布。
+        - most_common_patterns: List[Tuple[str, int]] — 按频次排序的 top 模式。
 
-        Returns zeros/empty collections if error_cases is empty.
+        error_cases 为空时返回零/空集合。
     """
     from collections import Counter, defaultdict
 
@@ -54,11 +53,11 @@ def error_distribution_report(error_cases: List[ErrorCase]) -> Dict[str, Any]:
             "most_common_patterns": [],
         }
 
-    # Count primary and secondary categories independently.
+    # 分别统计主、次类别。
     primary_counter: Counter = Counter()
     secondary_counter: Counter = Counter()
 
-    # Cross-tabulation: primary -> {secondary -> count}
+    # 交叉表：主 -> 次 -> 计数
     cross_tab: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     for case in error_cases:
@@ -69,14 +68,14 @@ def error_distribution_report(error_cases: List[ErrorCase]) -> Dict[str, Any]:
         secondary_counter[sec] += 1
         cross_tab[prim][sec] += 1
 
-    # Flatten cross-tabulation into sortable patterns.
+    # 将交叉表展平为可排序模式。
     patterns: List[Tuple[str, int]] = []
     for prim, sec_counts in cross_tab.items():
         for sec, count in sec_counts.items():
             patterns.append((f"{prim} + {sec}", count))
     patterns.sort(key=lambda x: x[1], reverse=True)
 
-    # Normalize cross_tab defaultdicts to regular dicts for serialization.
+    # 将 defaultdict 转为普通 dict 以便序列化。
     cross_tab_serializable = {
         prim: dict(sec_counts) for prim, sec_counts in cross_tab.items()
     }
@@ -91,22 +90,21 @@ def error_distribution_report(error_cases: List[ErrorCase]) -> Dict[str, Any]:
         "primary_distribution": dict(primary_counter),
         "secondary_distribution": dict(secondary_counter),
         "cross_tabulation": cross_tab_serializable,
-        "most_common_patterns": patterns[:10],  # Top 10 patterns.
+        "most_common_patterns": patterns[:10],  # 前 10 个模式。
     }
 
 
 def generate_error_summary(error_cases: List[ErrorCase]) -> str:
-    """Generate a human-readable error summary string.
+    """生成人类可读的错误摘要字符串。
 
-    Produces a formatted markdown-style string suitable for inclusion
-    in the evaluation report. Includes overall error statistics, primary
-    and secondary category distributions, and representative examples.
+    输出格式化的类 Markdown 字符串，适合写入评估报告。
+    含总体错误统计、主/次类别分布及代表性示例。
 
-    Args:
-        error_cases: List of ErrorCase objects from classify_errors().
+    参数:
+        error_cases: classify_errors() 返回的 ErrorCase 列表。
 
-    Returns:
-        Formatted multi-line string with error analysis summary.
+    返回:
+        多行格式化的错误分析摘要字符串。
     """
     if not error_cases:
         return "## Error Analysis Summary\n\nNo errors found. All predictions match the gold standard.\n"
@@ -119,11 +117,11 @@ def generate_error_summary(error_cases: List[ErrorCase]) -> str:
     lines.append("=" * 70)
     lines.append("")
 
-    # Overall statistics.
+    # 总体统计。
     lines.append(f"Total errors: {dist['total_errors']}")
     lines.append("")
 
-    # Primary category distribution.
+    # 主类别分布。
     lines.append("-" * 50)
     lines.append("Primary Category Distribution (Linguistic Phenomenon)")
     lines.append("-" * 50)
@@ -134,7 +132,7 @@ def generate_error_summary(error_cases: List[ErrorCase]) -> str:
         lines.append(f"  {cat_label:40s} {count:5d} ({pct:5.1f}%)")
     lines.append("")
 
-    # Secondary category distribution.
+    # 次类别分布。
     lines.append("-" * 50)
     lines.append("Secondary Category Distribution (Field Error Type)")
     lines.append("-" * 50)
@@ -145,7 +143,7 @@ def generate_error_summary(error_cases: List[ErrorCase]) -> str:
         lines.append(f"  {cat_label:40s} {count:5d} ({pct:5.1f}%)")
     lines.append("")
 
-    # Most common patterns.
+    # 最常见模式。
     lines.append("-" * 50)
     lines.append("Most Common Error Patterns (Primary + Secondary)")
     lines.append("-" * 50)
@@ -154,7 +152,7 @@ def generate_error_summary(error_cases: List[ErrorCase]) -> str:
         lines.append(f"  {pattern:50s} {count:5d} ({pct:5.1f}%)")
     lines.append("")
 
-    # Representative examples (first 3 error cases).
+    # 代表性示例（前 3 个错误案例）。
     lines.append("-" * 50)
     lines.append("Representative Error Examples")
     lines.append("-" * 50)
@@ -162,7 +160,7 @@ def generate_error_summary(error_cases: List[ErrorCase]) -> str:
         lines.append(f"\nExample {i + 1} (ID: {case.error_id})")
         lines.append(f"  Primary:   {case.primary_category.value}")
         lines.append(f"  Secondary: {case.secondary_category.value}")
-        # Show first 2 lines of explanation (the header + first detail line).
+        # 展示解释前两行（标题 + 首条细节）。
         expl_lines = case.linguistic_explanation.split("\n")
         for line in expl_lines[:3]:
             if line.strip():
@@ -183,7 +181,7 @@ def generate_error_summary(error_cases: List[ErrorCase]) -> str:
 
 
 def error_category_label(cat_value: str) -> str:
-    """Map an ErrorCategory enum value to a human-readable label."""
+    """将 ErrorCategory 枚举值映射为可读标签。"""
     labels = {
         "passive_voice": "Passive Voice",
         "conditional_boundary": "Conditional Boundary",
@@ -196,7 +194,7 @@ def error_category_label(cat_value: str) -> str:
 
 
 def field_error_label(cat_value: str) -> str:
-    """Map a FieldErrorType enum value to a human-readable label."""
+    """将 FieldErrorType 枚举值映射为可读标签。"""
     labels = {
         "subject": "Subject Error",
         "role": "Role Error",
@@ -209,17 +207,15 @@ def field_error_label(cat_value: str) -> str:
 
 
 def generate_error_id() -> str:
-    """Generate a unique error identifier.
+    """生成唯一错误标识符。
 
-    Uses a simple counter approach. In production, this could be replaced
-    with UUID-based identifiers for distributed environments.
+    使用简单计数思路。生产环境可换为 UUID 以支持分布式。
 
-    Returns:
-        String like "E-0001".
+    返回:
+        形如 "E-0001" 的字符串。
     """
-    # Simple counter: use timestamp-based suffix for reasonable uniqueness
-    # within a single run. Not globally unique but sufficient for single-run
-    # error analysis.
+    # 简单计数：单次运行内用时间戳后缀保证合理唯一性。
+    # 非全局唯一，但对单次运行的错误分析足够。
     ts = int(time.time() * 1000) % 100000
     rnd = random.randint(0, 999)
     return f"E-{ts:05d}-{rnd:03d}"

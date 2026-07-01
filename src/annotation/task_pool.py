@@ -1,8 +1,8 @@
 """
-Concurrent task execution framework for the annotation pipeline.
+标注流水线的并发任务执行框架。
 
-Provides progress tracking, console log suppression during tqdm display,
-and a worker pool that supports both serial and concurrent execution.
+提供进度跟踪、tqdm 显示期间抑制控制台日志，
+以及支持串行与并发执行的工作池。
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 # ======================================================================
-# Progress file helpers
+# 进度文件辅助函数
 # ======================================================================
 
 
 def _progress_file_path(output_path: str) -> Path:
-    """Return the progress file path corresponding to an output file."""
+    """返回与输出文件对应的进度文件路径。"""
     return Path(output_path).with_suffix(".progress")
 
 
@@ -42,7 +42,7 @@ def _write_progress_file(
     failed: int,
     lock: threading.Lock,
 ) -> None:
-    """Write one progress line, suitable for ``tail -f`` monitoring."""
+    """写入一行进度信息，便于 ``tail -f`` 监控。"""
     pct = (100.0 * completed / total) if total else 100.0
     line = (
         f"{desc}: {completed}/{total} ({pct:.1f}%) "
@@ -54,7 +54,7 @@ def _write_progress_file(
 
 
 def _suppress_console_logging() -> List[Tuple[logging.Handler, int]]:
-    """Temporarily suppress console log output to avoid breaking tqdm bars."""
+    """临时抑制控制台日志，避免打断 tqdm 进度条。"""
     saved: List[Tuple[logging.Handler, int]] = []
     for handler in logging.getLogger().handlers:
         if isinstance(handler, logging.StreamHandler) and handler.stream is sys.stderr:
@@ -64,13 +64,13 @@ def _suppress_console_logging() -> List[Tuple[logging.Handler, int]]:
 
 
 def _restore_console_logging(saved: List[Tuple[logging.Handler, int]]) -> None:
-    """Restore previously suppressed console log output levels."""
+    """恢复先前抑制的控制台日志级别。"""
     for handler, level in saved:
         handler.setLevel(level)
 
 
 # ======================================================================
-# Task pool executor
+# 任务池执行器
 # ======================================================================
 
 
@@ -83,16 +83,15 @@ def _run_task_pool(
     *,
     show_progress: bool = True,
 ) -> None:
-    """Execute a list of tasks with optional concurrency, appending each
-    result to a JSONL file as it completes.
+    """执行任务列表，可选并发，每完成一条即追加到 JSONL。
 
-    Args:
-        tasks:         Task list (each passed as first arg to worker_fn).
-        worker_fn:     Worker function with signature fn(task, index, total) -> dict.
-        output_path:   JSONL output path for append writes.
-        workers:       Number of concurrent worker threads (<=1 for serial).
-        desc:          Progress bar description.
-        show_progress: Whether to display a tqdm progress bar.
+    参数：
+        tasks:         任务列表（每项作为 worker_fn 的第一个参数）。
+        worker_fn:     工作函数，签名为 fn(task, index, total) -> dict。
+        output_path:   用于追加写入的 JSONL 输出路径。
+        workers:       并发工作线程数（<=1 为串行）。
+        desc:          进度条描述。
+        show_progress: 是否显示 tqdm 进度条。
     """
     if not tasks:
         return
@@ -105,7 +104,7 @@ def _run_task_pool(
     failed_count = 0
 
     def _on_result(record: dict) -> None:
-        """Callback on single task completion: append + update progress."""
+        """单任务完成回调：追加结果并更新进度。"""
         nonlocal completed, success_count, failed_count
         with lock:
             append_jsonl(output_path, record)

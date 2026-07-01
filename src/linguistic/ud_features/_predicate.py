@@ -1,5 +1,5 @@
 """
-Predicate identification: find_root_predicate and find_all_predicates.
+谓词识别：find_root_predicate 与 find_all_predicates。
 """
 
 from __future__ import annotations
@@ -13,29 +13,28 @@ logger = get_logger(__name__)
 
 
 def find_root_predicate(tree: DependencyTree) -> Optional[Token]:
-    """Locate the root predicate (main clause verb) of the sentence.
+    """定位句子的根谓词（主句动词）。
 
-    In UD, the root token is the one with head=0. In well-formed
-    sentences, this is typically the main verb. For legal clauses,
-    this identifies the core legal action (e.g., "deliver", "terminate",
-    "indemnify").
+    UD 中根词元为 head=0 者。格式良好的句子中，
+    通常为 main verb。对法律从句，标识核心法律动作
+    （如 "deliver"、"terminate"、"indemnify"）。
 
-    UD basis: root relation — head=0 marks the syntactic root.
+    UD 依据：root 关系 —— head=0 标记句法根。
 
-    Edge cases handled:
-      - Multiple roots (malformed parse): returns the first VERB root.
-        If no VERB root, returns the first root token.
-      - No root (empty tree): returns None.
-      - Root is not a VERB (e.g., copular "is" with nominal predicate):
-        checks for xcomp complement that carries the real action.
+    处理的边界情况：
+      - 多根（畸形解析）：返回第一个 VERB 根。
+        若无 VERB 根，返回第一个根词元。
+      - 无根（空树）：返回 None。
+      - 根非 VERB（如系词 "is" 带名词谓语）：
+        检查 xcomp 补语是否承载真实动作。
 
-    Args:
-        tree: Parsed dependency tree.
+    参数：
+        tree: 已解析的依存树。
 
-    Returns:
-        The root Token, or None if no root found.
+    返回：
+        根 Token，未找到根时返回 None。
 
-    Legal text example:
+    法律文本示例：
         "Seller shall deliver the Goods within 30 days."
         -> root = Token("deliver", upos="VERB", head=0)
     """
@@ -48,18 +47,18 @@ def find_root_predicate(tree: DependencyTree) -> Optional[Token]:
     if root_token is None:
         return None
 
-    # In legal text, the root is almost always a VERB (the main action).
-    # If it's not a verb, we may have a copular construction (e.g.,
-    # "The agreement IS binding") where the content predicate is
-    # elsewhere. Try to find the real predicate via xcomp or ccomp.
+    # 法律文本中根几乎总是 VERB（主要动作）。
+    # 若非动词，可能为系词构造（如
+    # "The agreement IS binding"），内容谓词在别处。
+    # 尝试通过 xcomp 或 ccomp 找到真实谓词。
     if root_token.upos != "VERB" and root_token.upos != "AUX":
         logger.debug(
             "Root token '%s' is %s, not VERB. Searching for xcomp/ccomp.",
             root_token.text, root_token.upos,
         )
-        # Look for an open clausal complement (xcomp) that carries
-        # the semantic predicate. Example: "Seller IS required to deliver"
-        # -> root=AUX("is"), xcomp(required, deliver) points to action.
+        # 查找承载语义谓词的开放从句补语（xcomp）。
+        # 例："Seller IS required to deliver"
+        # -> root=AUX("is")，xcomp(required, deliver) 指向动作。
         for child in tree.get_children(root_idx):
             if child.deprel in ("xcomp", "ccomp") and child.upos == "VERB":
                 logger.debug(
@@ -72,17 +71,16 @@ def find_root_predicate(tree: DependencyTree) -> Optional[Token]:
 
 
 def find_all_predicates(tree: DependencyTree) -> List[Token]:
-    """Find all verb tokens that could serve as predicates.
+    """查找所有可作谓词的动词词元。
 
-    Scans for all VERB tokens and ranks them by proximity to the root.
-    Useful for sentences with multiple clauses where the main predicate
-    is not the syntactic root.
+    扫描全部 VERB 词元并按与根的距离排序。
+    适用于主谓词非句法根的多从句句子。
 
-    Args:
-        tree: Dependency tree.
+    参数：
+        tree: 依存树。
 
-    Returns:
-        List of VERB Token objects, root-verb first.
+    返回：
+        VERB Token 列表，根动词优先。
     """
     verbs = tree.find_tokens_by_upos("VERB")
     if not verbs:
@@ -90,7 +88,7 @@ def find_all_predicates(tree: DependencyTree) -> List[Token]:
 
     root_idx = tree.root_index
 
-    # Sort by: (distance to root ascending, index ascending)
+    # 按（到根距离升序，索引升序）排序
     def _distance_to_root(token: Token) -> int:
         if root_idx is None:
             return 0

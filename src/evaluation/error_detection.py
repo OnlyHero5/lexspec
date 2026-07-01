@@ -1,8 +1,7 @@
 """
-Error detection helpers for field-level error identification.
+字段级错误识别的检测辅助函数。
 
-Compares prediction vs gold on each field and determines the secondary
-(field-level) error category.
+逐字段比较预测与金标，并确定次级（字段级）错误类别。
 """
 
 from __future__ import annotations
@@ -20,53 +19,53 @@ def detect_field_errors(
     prediction: LegalTriplet,
     gold: LegalTriplet,
 ) -> List[str]:
-    """Compare each field of prediction vs gold and return a list of error labels.
+    """逐字段比较预测与金标，返回错误标签列表。
 
-    Error labels are the field paths with mismatches:
-      - "subject.text": subject text token F1 < 1.0
-      - "subject.role": roles differ
-      - "action.predicate": predicate token F1 < 1.0
-      - "action.object": object token F1 < 1.0
-      - "condition.text": condition token F1 < 1.0
-      - "condition.omission": prediction has no condition, gold has one
-      - "condition.overextension": prediction has condition, gold has none OR
-        prediction span is substantially larger
+    错误标签为不匹配字段的路径：
+      - "subject.text": 主语文本词元 F1 < 1.0
+      - "subject.role": 角色不同
+      - "action.predicate": 谓词词元 F1 < 1.0
+      - "action.object": 宾语词元 F1 < 1.0
+      - "condition.text": 条件词元 F1 < 1.0
+      - "condition.omission": 预测无条件而金标有条件
+      - "condition.overextension": 预测有条件而金标无，或
+        预测片段明显更大
 
-    Args:
-        prediction: System prediction.
-        gold: Gold standard.
+    参数:
+        prediction: 系统预测。
+        gold: 金标准。
 
-    Returns:
-        List of field-path strings indicating errors. Empty list if perfect match.
+    返回:
+        表示错误的字段路径字符串列表。完全匹配时为空列表。
     """
     errors: List[str] = []
 
-    # Subject text: token-level F1 comparison.
+    # 主语文本：词元级 F1 比较。
     pred_st = normalize(prediction.subject.text)
     gold_st = normalize(gold.subject.text)
     _, _, st_f1 = token_f1(pred_st, gold_st)
     if st_f1 < 1.0:
         errors.append("subject.text")
 
-    # Subject role: exact enum match.
+    # 主语角色：枚举精确匹配。
     if prediction.subject.role != gold.subject.role:
         errors.append("subject.role")
 
-    # Predicate: token-level F1.
+    # 谓词：词元级 F1。
     pred_pr = normalize(prediction.action.predicate)
     gold_pr = normalize(gold.action.predicate)
     _, _, pr_f1 = token_f1(pred_pr, gold_pr)
     if pr_f1 < 1.0:
         errors.append("action.predicate")
 
-    # Object: token-level F1.
+    # 宾语：词元级 F1。
     pred_ob = normalize(prediction.action.object)
     gold_ob = normalize(gold.action.object)
     _, _, ob_f1 = token_f1(pred_ob, gold_ob)
     if ob_f1 < 1.0:
         errors.append("action.object")
 
-    # Condition: token-level F1 + omission/overextension detection.
+    # 条件：词元级 F1 + 遗漏/过度扩展检测。
     pred_co = normalize(prediction.condition.text)
     gold_co = normalize(gold.condition.text)
 
@@ -74,21 +73,21 @@ def detect_field_errors(
     has_gold_cond = bool(gold_co.strip())
 
     if not has_pred_cond and has_gold_cond:
-        # Omission: prediction missed a condition that exists in gold.
+        # 遗漏：预测漏掉金标中存在的条件。
         errors.append("condition.omission")
     elif has_pred_cond and not has_gold_cond:
-        # Over-extension: prediction hallucinated a condition.
+        # 过度扩展：预测幻觉出条件。
         errors.append("condition.overextension")
     elif has_pred_cond and has_gold_cond:
         _, _, co_f1 = token_f1(pred_co, gold_co)
         if co_f1 < 1.0:
-            # Both have conditions but they differ.
-            # Determine if it's primarily a boundary issue.
+            # 两侧均有条件但内容不同。
+            # 判断是否主要为边界问题。
             pred_tokens = set(pred_co.split())
             gold_tokens = set(gold_co.split())
             overlap = pred_tokens & gold_tokens
-            # If prediction is substantially larger (2x+) with high overlap,
-            # classify as overextension. Otherwise generic condition error.
+            # 若预测明显更大（2 倍以上）且重叠较高，
+            # 归类为过度扩展；否则为一般条件错误。
             if len(pred_tokens) > 2 * len(gold_tokens) and len(overlap) >= len(gold_tokens) * 0.5:
                 errors.append("condition.overextension")
             elif co_f1 < 0.5:
@@ -98,40 +97,39 @@ def detect_field_errors(
 
 
 def determine_secondary_category(field_errors: List[str]) -> FieldErrorType:
-    """Map detected field errors to the secondary (field-level) error type.
+    """将检测到的字段错误映射为次级（字段级）错误类型。
 
-    Priority order for classification when multiple fields are affected:
-      1. Subject errors (most critical for legal analysis)
-      2. Condition errors (boundary issues)
-      3. Predicate/Object errors
+    多字段同时出错时的分类优先级：
+      1. 主语错误（对法律分析最关键）
+      2. 条件错误（边界问题）
+      3. 谓词/宾语错误
 
-    Args:
-        field_errors: List of error field paths from detect_field_errors().
+    参数:
+        field_errors: detect_field_errors() 返回的错误字段路径列表。
 
-    Returns:
-        A single FieldErrorType enum value representing the primary field
-        affected.
+    返回:
+        表示主要受影响字段的单个 FieldErrorType 枚举值。
     """
-    # Check subject-related errors first (highest priority).
+    # 优先检查主语相关错误（最高优先级）。
     if any(e.startswith("subject") for e in field_errors):
         if "subject.role" in field_errors and "subject.text" not in field_errors:
             return FieldErrorType.ROLE
         return FieldErrorType.SUBJECT
 
-    # Check condition-related errors.
+    # 检查条件相关错误。
     if "condition.omission" in field_errors:
         return FieldErrorType.CONDITION_OMISSION
     if "condition.overextension" in field_errors:
         return FieldErrorType.CONDITION_OVEREXTENSION
     if any(e.startswith("condition") for e in field_errors):
-        return FieldErrorType.CONDITION_OMISSION  # Default condition error type.
+        return FieldErrorType.CONDITION_OMISSION  # 默认条件错误类型。
 
-    # Check predicate/object errors.
+    # 检查谓词/宾语错误。
     if "action.predicate" in field_errors:
         return FieldErrorType.PREDICATE
     if "action.object" in field_errors:
         return FieldErrorType.OBJECT
 
-    # Fallback: if we have errors but none matched (should not happen),
-    # default to SUBJECT as the most critical.
+    # 回退：有错误但未匹配（不应发生），
+    # 默认 SUBJECT 作为最关键字段。
     return FieldErrorType.SUBJECT

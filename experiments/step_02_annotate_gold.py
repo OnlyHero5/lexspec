@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 """
-LexSpec Step 02: Staged dual-model annotation pipeline
-========================================================
+LexSpec 步骤 02: 分阶段双模型标注流水线
+========================================
 
-This script runs in four stages, loading only one model on the remote
-server at a time:
+本脚本分四个阶段运行，每次仅在远程服务器上加载一个模型：
 
-  Stage 1 -- Gemma independent annotation, results saved locally:
+  阶段 1 —— Gemma 独立标注，结果保存至本地：
     python experiments/step_02_annotate_gold.py annotate --model gemma
 
-  Stage 2 -- After switching server to Qwen:
+  阶段 2 —— 切换服务器至 Qwen 后：
     python experiments/step_02_annotate_gold.py annotate --model qwen
     python experiments/step_02_annotate_gold.py review --reviewer qwen --source gemma
 
-  Stage 3 -- After switching server back to Gemma:
+  阶段 3 —— 切换服务器回 Gemma 后：
     python experiments/step_02_annotate_gold.py review --reviewer gemma --source qwen
 
-  Stage 4 -- Merge into gold standard (no LLM needed):
+  阶段 4 —— 合并为金标准（无需大语言模型）：
     python experiments/step_02_annotate_gold.py merge
 
-All output is written to data/annotations/ by default. Supports --resume
-for checkpoint/resume.
+默认所有输出写入 data/annotations/。支持 --resume 断点续跑。
 """
 
 from __future__ import annotations
@@ -28,7 +26,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Add project root to Python path so src imports resolve correctly.
+# 将项目根目录加入 Python 路径，以便正确解析 src 导入。
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -39,7 +37,7 @@ from src.utils.logging import setup_logging
 
 
 def main() -> None:
-    """Main entry point: parse CLI args and dispatch to the appropriate subcommand."""
+    """主入口：解析命令行参数并分发至对应子命令。"""
     parser = build_parser()
     args = parser.parse_args()
     import logging as _logging

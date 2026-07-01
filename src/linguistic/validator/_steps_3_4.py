@@ -1,8 +1,8 @@
 """
-Validation Steps 3 & 4: Subject and Object Validation.
+校验步骤 3 与 4：主语与宾语校验。
 
-Step 3: Validate the subject field against UD-derived semantic agent.
-Step 4: Validate the object field against UD-derived semantic patient.
+步骤 3：根据 UD 推导的语义施事校验主语字段。
+步骤 4：根据 UD 推导的语义受事校验宾语字段。
 """
 
 from __future__ import annotations
@@ -23,54 +23,54 @@ def step3_validate_subject(
     corrections: List[FieldCorrection],
     feedback_parts: List[str],
 ) -> bool:
-    """Step 3: Validate the subject field.
+    """步骤 3：校验主语字段。
 
-    Compares the LLM-extracted subject.text against the UD-derived
-    semantic agent token.
+    将大语言模型抽取的 subject.text 与 UD 推导的
+    语义施事词元比对。
 
-    Match criteria (in priority order):
-      1. Exact match after normalization: "Seller" == "Seller".
-      2. Substring match: "the Seller" contains "Seller".
-      3. Token overlap: both strings share key content tokens.
-      4. Coordination match: UD subject is a conjunct and
-         LLM extracted the full coordination or a single conjunct.
+    匹配准则（按优先级）：
+      1. 规范化后精确匹配："Seller" == "Seller"。
+      2. 子串匹配："the Seller" 包含 "Seller"。
+      3. 词元重叠：两字符串共享关键实词。
+      4. 并列匹配：UD 主语为并列项，大语言模型
+         抽取了完整并列或单一并列项。
 
-    If the LLM subject does NOT match the UD subject:
-      - If UD has a clear subject -> Add FieldCorrection (CORRECTED path).
-      - If UD has no subject (agentless passive, missing nsubj) ->
-        Add feedback and trigger REFLEXION.
+    若大语言模型主语与 UD 主语不匹配：
+      - UD 有明确主语 -> 添加 FieldCorrection（CORRECTED 路径）。
+      - UD 无主语（无施事被动、缺失 nsubj）->
+        添加反馈并触发 REFLEXION。
 
-    Args:
-        llm_subject: The LLM-extracted subject text.
-        ud_subject: The UD-derived semantic agent token (or None).
-        corrections: List to append FieldCorrection objects to.
-        feedback_parts: List to append feedback strings to.
+    参数：
+        llm_subject: 大语言模型抽取的主语文本。
+        ud_subject: UD 推导的语义施事词元（或 None）。
+        corrections: 追加 FieldCorrection 的列表。
+        feedback_parts: 追加反馈字符串的列表。
 
-    Returns:
-        True if the subject is valid (no correction needed).
+    返回：
+        主语有效（无需修正）时返回 True。
     """
-    # Case A: LLM extracted a subject but UD found none.
-    # This could mean:
-    #   - Agentless passive: the LLM inferred an agent from context.
-    #     This is actually GOOD LLM behavior, but we flag it for
-    #     manual review since the UD parse cannot confirm.
-    #   - The LLM hallucinated a subject.
+    # 情况 A：大语言模型抽取了主语但 UD 未找到。
+    # 可能原因：
+    #   - 无施事被动：大语言模型从上下文推断施事。
+    #     这实际是大语言模型的良好行为，但我们标记
+    #     供人工复核，因 UD 解析无法确认。
+    #   - 大语言模型幻觉出主语。
     if ud_subject is None:
         if llm_subject and llm_subject.strip():
-            # LLM extracted a subject where UD sees none.
+            # 大语言模型在 UD 无主语处抽取了主语。
             feedback_parts.append(
                 f"Subject '{llm_subject}' was extracted by the LLM, but "
                 f"no syntactic subject was found in the UD parse. This may "
                 f"be an agentless passive where the LLM correctly inferred "
                 f"the agent from discourse context. Manual review recommended."
             )
-            # No correction applied (we cannot determine correctness).
-            return True  # Treat as "valid" since we can't disprove it.
+            # 不应用修正（无法确定正误）。
+            return True  # 视为「有效」，因无法证伪。
         else:
-            # Both LLM and UD agree: no subject.
+            # 大语言模型与 UD 一致：无主语。
             return True
 
-    # Case B: UD found a subject but LLM didn't extract one.
+    # 情况 B：UD 找到主语但大语言模型未抽取。
     if not llm_subject or not llm_subject.strip():
         feedback_parts.append(
             f"Subject is missing from the LLM extraction but UD parse "
@@ -89,13 +89,13 @@ def step3_validate_subject(
         ))
         return False
 
-    # Case C: Both have subjects — compare them.
+    # 情况 C：双方均有主语 —— 比对。
     if match_text(llm_subject, ud_subject):
-        return True  # Match found.
+        return True  # 匹配。
 
-    # Subject does not match.
-    # If the LLM subject contains the UD subject text as a substring,
-    # it's likely a coordination expansion — acceptable.
+    # 主语不匹配。
+    # 若大语言模型主语包含 UD 主语文本作为子串，
+    # 可能为并列扩展 —— 可接受。
     if normalize_text(ud_subject.text) in normalize_text(llm_subject):
         logger.debug(
             "LLM subject '%s' contains UD subject '%s' — accepting as "
@@ -103,7 +103,7 @@ def step3_validate_subject(
         )
         return True
 
-    # Mismatch: add correction.
+    # 不匹配：添加修正。
     corrections.append(FieldCorrection(
         field="subject.text",
         original=llm_subject,
@@ -131,37 +131,36 @@ def step4_validate_object(
     corrections: List[FieldCorrection],
     feedback_parts: List[str],
 ) -> bool:
-    """Step 4: Validate the object field.
+    """步骤 4：校验宾语字段。
 
-    Compares LLM action.object against UD-derived semantic patient.
+    将大语言模型 action.object 与 UD 推导的语义受事比对。
 
-    Uses the same matching logic as subject validation (Step 3):
-      - Exact match after normalization
-      - Substring/token overlap match
-      - Coordination expansion match
+    使用与主语校验（步骤 3）相同的匹配逻辑：
+      - 规范化后精确匹配
+      - 子串/词元重叠匹配
+      - 并列扩展匹配
 
-    Edge cases:
-      - Intransitive verb: UD has no obj. If LLM also has no object,
-        this is valid. If LLM extracted an object for an intransitive
-        verb, it's likely a hallucination or extracted from a prepositional
-        complement.
-      - Passive without nsubj:pass: The patient may not be expressed.
-        Rare in legal text but possible in impersonal constructions.
+    边界情况：
+      - 不及物动词：UD 无 obj。大语言模型也无宾语时有效。
+        大语言模型为不及物动词抽取宾语时，可能为幻觉
+        或从介词补语抽取。
+      - 被动无 nsubj:pass：受事可能未表达。
+        法律文本中少见，但非人称构造中可能。
 
-    Args:
-        llm_object: The LLM-extracted object text.
-        ud_object: The UD-derived semantic patient token (or None).
-        corrections: List to append FieldCorrection objects to.
-        feedback_parts: List to append feedback strings to.
+    参数：
+        llm_object: 大语言模型抽取的宾语文本。
+        ud_object: UD 推导的语义受客词元（或 None）。
+        corrections: 追加 FieldCorrection 的列表。
+        feedback_parts: 追加反馈字符串的列表。
 
-    Returns:
-        True if the object is valid (no correction needed).
+    返回：
+        宾语有效（无需修正）时返回 True。
     """
-    # Case A: Neither LLM nor UD has an object.
+    # 情况 A：大语言模型与 UD 均无宾语。
     if ud_object is None and (not llm_object or not llm_object.strip()):
         return True
 
-    # Case B: UD found an object but LLM didn't.
+    # 情况 B：UD 有宾语但大语言模型无。
     if ud_object is not None and (not llm_object or not llm_object.strip()):
         feedback_parts.append(
             f"Object is missing from the LLM extraction but UD parse "
@@ -180,9 +179,8 @@ def step4_validate_object(
         ))
         return False
 
-    # Case C: UD has no object but LLM extracted one.
-    # The verb may be intransitive, or the LLM may have extracted a
-    # prepositional complement as an object.
+    # 情况 C：UD 无宾语但大语言模型抽取了。
+    # 动词可能不及物，或大语言模型将介词补语当作宾语。
     if ud_object is None and llm_object and llm_object.strip():
         feedback_parts.append(
             f"Object '{llm_object}' was extracted by the LLM but no "
@@ -191,16 +189,16 @@ def step4_validate_object(
             f"complement or indirect object, this may be semantically "
             f"valid but syntactically unconfirmed."
         )
-        # We cannot disprove the LLM's extraction, but we flag it.
-        # No automatic correction — the LLM may be right about
-        # semantic content even if it's not a syntactic obj.
+        # 无法证伪大语言模型抽取，但予以标记。
+        # 不自动修正 —— 大语言模型可能在语义上正确
+        # 即使非句法 obj。
         return True
 
-    # Case D: Both have objects — compare them.
+    # 情况 D：双方均有宾语 —— 比对。
     if ud_object is not None and match_text(llm_object, ud_object):
         return True
 
-    # Mismatch: LLM and UD disagree on the object.
+    # 不匹配：大语言模型与 UD 对宾语意见不一。
     if ud_object is not None:
         corrections.append(FieldCorrection(
             field="action.object",

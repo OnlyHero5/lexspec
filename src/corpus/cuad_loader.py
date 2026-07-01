@@ -1,10 +1,10 @@
 """
-CUAD v1 data loading utilities.
+CUAD v1 数据加载工具。
 
-Supports three source formats:
-  - Full contract contexts from CUAD_v1.json (sentence mode)
-  - Expert-annotated clause spans from master_clauses.csv (spans mode)
-  - QA answer spans from CUAD_v1.json (qa_spans mode)
+支持三种数据源格式：
+  - CUAD_v1.json 中的完整合同上下文（句子模式）
+  - master_clauses.csv 中的专家标注条款片段（片段模式）
+  - CUAD_v1.json 中的 QA 答案片段（qa_spans 模式）
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Columns to skip when loading CUAD spans.
+# 加载 CUAD 片段时跳过的列。
 _SKIP_COLUMNS = frozenset({
     "Filename", "Document Name", "Document Name-Answer",
     "Parties", "Parties-Answer",
@@ -27,30 +27,29 @@ _SKIP_COLUMNS = frozenset({
 
 
 def load_cuad_data(cuad_path: str) -> List[str]:
-    """Load CUAD v1 JSON and extract all paragraph contexts.
+    """加载 CUAD v1 JSON 并提取全部段落上下文。
 
-    CUAD v1 JSON structure::
+    CUAD v1 JSON 结构::
 
         {
           "version": "aok_v1.0",
           "data": [
             {"title": "...", "paragraphs": [
-              {"context": "<full contract text>", "qas": [...]},
+              {"context": "<完整合同文本>", "qas": [...]},
               ...
             ]},
             ...
           ]
         }
 
-    Extracts the ``context`` field of each paragraph. Each context may
-    contain an entire contract; sentence segmentation is done downstream
-    via Stanza's sentence splitter.
+    提取每个段落的 ``context`` 字段。各上下文可能
+    含整份合同；分句由下游 Stanza 分句器完成。
 
-    Args:
-        cuad_path: Path to CUAD_v1.json file.
+    参数：
+        cuad_path: CUAD_v1.json 文件路径。
 
-    Returns:
-        List of paragraph context strings (one per paragraph).
+    返回：
+        段落上下文字符串列表（每段一条）。
     """
     logger.info("Loading CUAD data: %s", cuad_path)
     with open(cuad_path, "r", encoding="utf-8") as fh:
@@ -71,10 +70,10 @@ def load_cuad_data(cuad_path: str) -> List[str]:
 
 
 def load_cuad_spans(master_clauses_path: str) -> List[str]:
-    """Load expert-annotated clause fragments from CUAD master_clauses.csv.
+    """从 CUAD master_clauses.csv 加载专家标注条款片段。
 
-    Each non-answer column may contain clause text for one of 41 categories.
-    Returns a deduplicated list of clause texts (typically ~5k unique fragments).
+    每个非 Answer 列可能含 41 类之一的一条条款文本。
+    返回去重后的条款文本列表（通常约 5k 个唯一片段）。
     """
     path = Path(master_clauses_path)
     if not path.exists():
@@ -101,7 +100,7 @@ def load_cuad_spans(master_clauses_path: str) -> List[str]:
 
 
 def load_cuad_qa_spans(cuad_path: str) -> List[str]:
-    """Load answer spans from CUAD SQuAD-format JSON (~13k annotated fragments)."""
+    """从 CUAD SQuAD 格式 JSON 加载答案片段（约 13k 标注片段）。"""
     with open(cuad_path, "r", encoding="utf-8") as fh:
         cuad = json.load(fh)
 

@@ -1,14 +1,13 @@
 """
-LLM-Based Contract Clause Annotator for Gold-Standard Test Set Construction
-============================================================================
-Uses LLMs (Qwen3.6 27B or Gemma4 31B) to annotate contract clauses with
-legal triplets. Each annotation model independently annotates every clause.
+基于 LLM 的合同条款标注器（金标准测试集构建）
+============================================
+使用 LLM（Qwen3.6 27B 或 Gemma4 31B）为合同条款标注法律三元组。
+每个标注模型独立标注每条条款。
 
-**Key constraint**: The annotation models are COMPLETELY ISOLATED from the
-experiment model (Qwen3.5 9B) used in Phases 2-3. This module is used ONLY
-in Phase 1 (test set construction) and never appears in Phases 2-3.
+**关键约束**：标注模型与第二、三阶段使用的实验模型（Qwen3.5 9B）完全隔离。
+本模块仅用于第一阶段（测试集构建），不出现在第二、三阶段。
 
-Usage::
+用法::
 
     from src.extraction.client import LLMClient, ClientConfig
     from src.annotation.llm_annotator import LLMAnnotator
@@ -39,19 +38,19 @@ logger = get_logger(__name__)
 
 
 class LLMAnnotator:
-    """Annotate contract clauses with legal triplets using an LLM.
+    """使用 LLM 为合同条款标注法律三元组。
 
-    Supports dual-model annotation -- each model annotates independently,
-    and results are reconciled through field-level voting consensus
-    (see src/annotation/consensus.py).
+    支持双模型标注 — 各模型独立标注，
+    结果通过字段级投票共识调和
+    （见 src/annotation/consensus.py）。
 
-    Prompts are loaded from configs/prompts.yaml (see annotation.system
-    and annotation.user fields). Raises if the config is unavailable.
+    提示词从 configs/prompts.yaml 加载（见 annotation.system
+    与 annotation.user 字段）。配置不可用时抛出异常。
 
-    Attributes:
-        client: The LLM client configured for the annotation model.
-        system_prompt: System prompt for annotation calls.
-        user_template: User prompt template containing {sentence} placeholder.
+    属性：
+        client: 为标注模型配置的 LLM 客户端。
+        system_prompt: 标注调用的系统提示词。
+        user_template: 含 {sentence} 占位符的用户提示词模板。
     """
 
     def __init__(
@@ -59,16 +58,16 @@ class LLMAnnotator:
         client: "LLMClient",
         prompts_path: str = "configs/prompts.yaml",
     ) -> None:
-        """Initialize the annotator.
+        """初始化标注器。
 
-        Loads annotation prompt templates from the YAML config file.
-        Raises an error if the file is missing or malformed.
+        从 YAML 配置文件加载标注提示词模板。
+        文件缺失或格式错误时抛出异常。
 
-        Args:
-            client: LLM client configured for the annotation model
-                    (e.g., Qwen3.6 27B or Gemma4 31B).
-            prompts_path: Path to the prompts YAML configuration file.
-                          Defaults to "configs/prompts.yaml".
+        参数：
+            client: 为标注模型配置的 LLM 客户端
+                    （如 Qwen3.6 27B 或 Gemma4 31B）。
+            prompts_path: 提示词 YAML 配置文件路径。
+                          默认为 "configs/prompts.yaml"。
         """
         self.client = client
         self.system_prompt, self.user_template = load_annotation_prompts(
@@ -84,31 +83,30 @@ class LLMAnnotator:
         )
 
     # ------------------------------------------------------------------
-    # Public API
+    # 公开 API
     # ------------------------------------------------------------------
 
     def annotate(self, clause: str) -> LegalTriplet:
-        """Annotate a single contract clause.
+        """标注单条合同条款。
 
-        Injects the clause text into the prompt template, sends it to the
-        LLM, and parses the response into a LegalTriplet.
+        将条款文本注入提示词模板，发送给 LLM，
+        并将响应解析为 LegalTriplet。
 
-        Args:
-            clause: The contract clause text to annotate.
+        参数：
+            clause: 待标注的合同条款文本。
 
-        Returns:
-            A LegalTriplet with the extracted subject, action, and condition.
+        返回：
+            含主体、行为、条件提取结果的 LegalTriplet。
 
-        Raises:
-            ValueError: If the LLM response cannot be parsed into a valid
-                        LegalTriplet.
+        异常:
+            ValueError: LLM 响应无法解析为有效 LegalTriplet，或调用失败时。
         """
         logger.debug("Annotating clause: %.80s...", clause)
 
-        # Step 1: Inject clause text into the user prompt template.
+        # 步骤 1：将条款文本注入用户提示词模板。
         user_prompt = self.user_template.format(sentence=clause)
 
-        # Step 2: Call the LLM.
+        # 步骤 2：调用 LLM。
         try:
             response = self.client.complete_structured(
                 system_prompt=self.system_prompt,
@@ -122,7 +120,7 @@ class LLMAnnotator:
 
         logger.debug("LLM annotation response length: %d chars", len(response))
 
-        # Step 3: Parse the response into a LegalTriplet.
+        # 步骤 3：将响应解析为 LegalTriplet。
         triplet = parse_llm_response(response)
 
         if triplet is None:
@@ -156,20 +154,20 @@ class LLMAnnotator:
 
     @staticmethod
     def _is_substantive_triplet(triplet: LegalTriplet) -> bool:
-        """Check that a triplet contains substantive content.
+        """检查三元组是否包含实质性内容。
 
-        Rejects shells where parsing succeeded but all core fields are empty.
+        拒绝解析成功但核心字段均为空的外壳。
 
-        Rules:
-          - Operative clause: needs at least subject.text + action.predicate
-          - Definitional clause ("X means Y"): needs predicate + object even
-            without a party.
+        规则：
+          - 操作性条款：至少需要 subject.text + action.predicate
+          - 定义性条款（「X means Y」）：即使无当事方，
+            也需要 predicate + object
 
-        Args:
-            triplet: The LegalTriplet to validate.
+        参数：
+            triplet: 待验证的 LegalTriplet。
 
-        Returns:
-            True if the triplet has meaningful content, False otherwise.
+        返回：
+            三元组有有意义内容时为 True，否则为 False。
         """
         has_subject = bool(triplet.subject.text.strip())
         has_predicate = bool(triplet.action.predicate.strip())
@@ -185,20 +183,19 @@ class LLMAnnotator:
         clauses: List[str],
         show_progress: bool = True,
     ) -> List[LegalTriplet]:
-        """Annotate a batch of contract clauses.
+        """批量标注合同条款。
 
-        Each clause is annotated independently. Displays a tqdm progress bar
-        by default. Single-clause failures do not abort the batch; failed
-        entries are filled with a placeholder triplet so the output list
-        always has the same length as the input.
+        每条条款独立标注。默认显示 tqdm 进度条。
+        单条失败不会中止整批；失败项用占位三元组填充，
+        使输出列表长度始终与输入一致。
 
-        Args:
-            clauses: List of clause texts to annotate.
-            show_progress: Whether to show a tqdm progress bar. Default True.
+        参数：
+            clauses: 待标注的条款文本列表。
+            show_progress: 是否显示 tqdm 进度条。默认 True。
 
-        Returns:
-            List of LegalTriplets, same length as the input. Failed entries
-            have subject.text="ERROR".
+        返回：
+            LegalTriplet 列表，长度与输入相同。失败项
+            的 subject.text 为 "ERROR"。
         """
         iterator = clauses
         if show_progress:

@@ -1,12 +1,12 @@
 """
-Cross-Model Annotation Reviewer
-=================================
-One annotation model reviews another model's labels on the same clause.
+跨模型标注审查器
+================
+让一个标注模型审查另一模型对同一条款的标注。
 
-Used in the phased workflow:
-  1. Gemma annotates → save locally
-  2. Switch to Qwen → Qwen annotates + Qwen reviews Gemma
-  3. Switch to Gemma → Gemma reviews Qwen
+用于分阶段工作流：
+  1. Gemma 标注 → 本地保存
+  2. 切换到 Qwen → Qwen 标注 + Qwen 审查 Gemma
+  3. 切换到 Gemma → Gemma 审查 Qwen
   4. merge → gold_triplets.jsonl
 """
 
@@ -29,18 +29,18 @@ logger = get_logger(__name__)
 
 @dataclass
 class FieldJudgment:
-    """Per-field accept/reject judgment from the reviewer."""
+    """审查器对每个字段的接受/拒绝判断。"""
 
     field: str
-    judgment: str  # "accept" | "reject"
+    judgment: str  # 接受或拒绝
     reason: str = ""
 
 
 @dataclass
 class ReviewResult:
-    """Structured output of a cross-model review."""
+    """跨模型审查的结构化输出。"""
 
-    verdict: str  # "accept" | "partial" | "reject"
+    verdict: str  # 接受、部分接受或拒绝
     field_judgments: List[FieldJudgment] = field(default_factory=list)
     corrected_triplet: Optional[LegalTriplet] = None
     overall_reason: str = ""
@@ -48,7 +48,7 @@ class ReviewResult:
 
 
 class CrossModelReviewer:
-    """Have one LLM review another model's triplet annotation."""
+    """让一个 LLM 审查另一模型的三元组标注。"""
 
     def __init__(
         self,
@@ -68,7 +68,7 @@ class CrossModelReviewer:
         source_triplet: LegalTriplet,
         source_model: str,
     ) -> ReviewResult:
-        """Review a single annotation."""
+        """审查单条标注。"""
         source_json = json.dumps(
             source_triplet.model_dump(mode="json"),
             ensure_ascii=False,
@@ -91,10 +91,10 @@ class CrossModelReviewer:
         items: List[Dict[str, Any]],
         show_progress: bool = True,
     ) -> List[ReviewResult]:
-        """Review a batch of annotation records.
+        """批量审查标注记录。
 
-        Each item must have keys: text, triplet (dict or LegalTriplet),
-        and optionally source_model / model_role.
+        每项须含键：text、triplet（dict 或 LegalTriplet），
+        以及可选的 source_model / model_role。
         """
         iterator = items
         if show_progress:
@@ -120,7 +120,7 @@ class CrossModelReviewer:
         return results
 
     def _load_review_prompts(self, prompts_path: str) -> tuple[str, str]:
-        """Load review prompts from YAML config. Raises on any failure."""
+        """从 YAML 配置加载审查提示词。任何失败均抛出异常。"""
         import yaml
         with open(prompts_path, "r", encoding="utf-8") as fh:
             config = yaml.safe_load(fh)

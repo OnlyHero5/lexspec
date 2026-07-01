@@ -1,8 +1,8 @@
 """
-Validation Steps 1 & 2: Predicate Location and Voice Detection.
+校验步骤 1 与 2：谓词定位与语态检测。
 
-Step 1: Locate the root predicate via UD parse.
-Step 2: Detect passive voice and restore semantic arguments.
+步骤 1：通过 UD 解析定位根谓词。
+步骤 2：检测被动语态并恢复语义论元。
 """
 
 from __future__ import annotations
@@ -18,32 +18,30 @@ logger = get_logger(__name__)
 
 
 def step1_find_predicate(tree: DependencyTree) -> Optional[Token]:
-    """Step 1: Locate the root predicate via UD parse.
+    """步骤 1：通过 UD 解析定位根谓词。
 
-    The root token (head=0) is typically the main clause verb.
-    This is the starting point for all subsequent analysis because
-    all arguments (subject, object, conditions) are dependents of
-    the root predicate in UD annotation.
+    根词元（head=0）通常为主句动词。
+    这是后续全部分析的起点，因 UD 标注中
+    全部论元（主语、宾语、条件）均为根谓词的依存。
 
-    UD basis: The root of the dependency tree is the token whose
-    head field is 0. In a well-formed UD tree, there is exactly
-    one root. If there are multiple (malformed parse), we choose
-    the first VERB root.
+    UD 依据：依存树的根为 head 字段为 0 的词元。
+    格式良好的 UD 树中恰有一个根。若有多个（畸形解析），
+    选择第一个 VERB 根。
 
-    For legal clauses, the root is almost always a VERB:
+    法律从句中根几乎总是 VERB：
       "Seller shall deliver the Goods." -> root = "deliver"
       "The Agreement shall be governed by..." -> root = "governed"
 
-    Edge case: The root may be an AUX (copula) with the semantic
-    predicate in an xcomp complement. We try to resolve this:
+    边界情况：根可能为 AUX（系词），语义谓词在 xcomp 补语中。
+    尝试解析：
       "The Agreement IS binding." -> root = AUX "is"
-      We then check for xcomp(IS, binding) -> predicate = "binding"
+      再检查 xcomp(IS, binding) -> predicate = "binding"
 
-    Args:
-        tree: Dependency tree.
+    参数：
+        tree: 依存树。
 
-    Returns:
-        Root predicate Token, or None if no root is found.
+    返回：
+        根谓词 Token，未找到根时返回 None。
     """
     return find_root_predicate(tree)
 
@@ -52,47 +50,47 @@ def step2_detect_voice(
     tree: DependencyTree,
     predicate_idx: int,
 ) -> Tuple[bool, Optional[Token], Optional[Token]]:
-    """Step 2: Detect passive voice and restore semantic arguments.
+    """步骤 2：检测被动语态并恢复语义论元。
 
-    The key insight: in passive voice, the UD surface relations
-    (nsubj:pass, obl:agent) do NOT correspond to the triplet fields
-    (subject=agent, object=patient). We need to map:
+    关键认识：被动语态下，UD 表层关系
+    （nsubj:pass、obl:agent）不直接对应三元组字段
+    （subject=施事、object=受事）。需映射：
 
-    Passive mapping:
-      - UD nsubj:pass (surface subject) -> Semantic PATIENT -> Triplet OBJECT
-      - UD obl:agent (by-phrase)       -> Semantic AGENT   -> Triplet SUBJECT
+    被动映射：
+      - UD nsubj:pass（表层主语） -> 语义受事 -> 三元组宾语
+      - UD obl:agent（by 短语）   -> 语义施事 -> 三元组主语
 
-    Active mapping:
-      - UD nsubj (subject)  -> Semantic AGENT   -> Triplet SUBJECT
-      - UD obj (object)     -> Semantic PATIENT -> Triplet OBJECT
+    主动映射：
+      - UD nsubj（主语）  -> 语义施事 -> 三元组主语
+      - UD obj（宾语）    -> 语义受事 -> 三元组宾语
 
-    This step produces the UD-derived subject and object tokens
-    that are used as ground truth for validating the LLM triplet.
+    本步骤产出用于校验大语言模型三元组的
+    UD 推导主语与宾语词元（作为真值）。
 
-    Args:
-        tree: Dependency tree.
-        predicate_idx: 1-based index of the predicate.
+    参数：
+        tree: 依存树。
+        predicate_idx: 谓词的 1 基索引。
 
-    Returns:
-        (is_passive, ud_subject, ud_object) tuple.
-        - is_passive: Whether passive voice was detected.
-        - ud_subject: The semantic AGENT (actor).
-          - Active: nsubj token.
-          - Passive: obl:agent token (may be None for agentless passive).
-        - ud_object: The semantic PATIENT (acted-upon).
-          - Active: obj token.
-          - Passive: nsubj:pass token.
+    返回：
+        (is_passive, ud_subject, ud_object) 元组。
+        - is_passive: 是否检测到被动语态。
+        - ud_subject: 语义施事（行为者）。
+          - 主动：nsubj 词元。
+          - 被动：obl:agent 词元（无施事被动时可为 None）。
+        - ud_object: 语义受事（被作用者）。
+          - 主动：obj 词元。
+          - 被动：nsubj:pass 词元。
     """
     is_passive = PassiveDetector.is_passive(tree, predicate_idx)
 
     if is_passive:
         logger.debug("Passive voice detected at predicate index %d", predicate_idx)
-        # In passive: the semantic AGENT is obl:agent, PATIENT is nsubj:pass.
+        # 被动：语义施事为 obl:agent，受事为 nsubj:pass。
         agent, patient = PassiveDetector.restore_passive_args(tree, predicate_idx)
-        # Return: ud_subject = agent (the doer), ud_object = patient (undergoer).
+        # 返回：ud_subject = 施事，ud_object = 受事。
         return (True, agent, patient)
     else:
         logger.debug("Active voice at predicate index %d", predicate_idx)
-        # In active: semantic AGENT = nsubj, PATIENT = obj.
+        # 主动：语义施事 = nsubj，受事 = obj。
         agent, patient = PassiveDetector.get_active_args(tree, predicate_idx)
         return (False, agent, patient)

@@ -1,42 +1,32 @@
 # =============================================================================
-# LexSpec: Prompt Templates Configuration
+# LexSpec：提示模板配置
 # =============================================================================
 #
-# Purpose:
-#   This file contains all LLM prompt templates used throughout the LexSpec
-#   pipeline.  Each template is a complete, self-contained instruction that
-#   the system formats with runtime variables (sentence text, dependency
-#   parse information, error hints, etc.) before sending to the LLM.
+# 用途：
+#   本文件包含 LexSpec 流水线使用的全部 LLM 提示模板。各模板为完整、自包含的指令，
+#   系统在发送至 LLM 前用运行时变量（句子文本、依存句法信息、错误提示等）格式化。
 #
-# Template design principles:
-#   - Role-based: system prompts define the persona; user prompts carry the
-#     specific task instance.
-#   - Structured output: all extraction prompts request JSON output with
-#     explicitly specified keys to enable programmatic parsing.
-#   - Few-shot when helpful: annotation prompts include examples to calibrate
-#     the model's understanding of legal contract semantics.
-#   - Reflexion-aware: the feedback template separates error identification
-#     from correction, giving the model a clear "what went wrong → fix it"
-#     reasoning path.
+# 模板设计原则：
+#   - 基于角色：system 提示定义人设；user 提示承载具体任务实例。
+#   - 结构化输出：全部抽取提示要求 JSON 输出并明确指定键，便于程序解析。
+#   - 必要时少样本：标注提示含示例以校准模型对法律合同语义的理解。
+#   - Reflexion 感知：反馈模板将错误识别与纠正分离，为模型提供清晰的
+#     “何处出错 → 如何修正”推理路径。
 #
-# Sections:
-#   1. annotation  — Dual-model gold-label generation prompts.
-#   2. extraction   — LLM-based element extraction prompts (baseline).
-#   3. reflexion    — Reflexion self-correction feedback template and
-#                     structured error hints.
+# 章节：
+#   1. annotation  — 双模型金标准标签生成提示。
+#   2. extraction   — 基于 LLM 的元素抽取提示（基线）。
+#   3. reflexion    — Reflexion 自纠错反馈模板与结构化错误提示。
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# 1. Annotation Prompts
+# 1. 标注提示
 # ---------------------------------------------------------------------------
-# These prompts are used by the two annotation models (Qwen3.6 27B and
-# Gemma4 31B) to independently label sentences from legal contracts.
-# The outputs are reconciled into gold-standard labels.  These prompts
-# are NEVER used during the experiment extraction phase — they serve
-# only to construct the ground-truth dataset.
+# 两标注模型（Qwen3.6 27B 与 Gemma4 31B）用这些提示独立标注法律合同句子。
+# 输出调和为金标准标签。实验抽取阶段绝不使用——仅用于构建真值数据集。
 annotation:
 
-  # Gold-label annotation (Qwen / Gemma). One main deontic legal action per sentence.
+  # 金标准标注（Qwen / Gemma）。每句一个主要道义法律动作。
   system: |
     You are an expert legal linguist annotating English contract clauses for
     LexSpec gold labels. Extract exactly ONE main legal action triplet:
@@ -124,7 +114,7 @@ annotation:
 
     Return ONLY a single JSON object (no markdown, no bullets, no prose).
 
-  # Cross-model review: one annotator checks another model's labels.
+  # 跨模型审阅：一标注器检查另一模型的标签。
   review:
     system: |
       You are an expert legal linguist reviewing another model's annotation
@@ -180,15 +170,12 @@ annotation:
       Return your review as a single JSON object.
 
 # ---------------------------------------------------------------------------
-# These prompts are used by the experiment model (Qwen3.5 9B) during the
-# baseline extraction phase.  The "baseline" variant represents a pure LLM
-# extraction without dependency-parse constraints or Reflexion correction.
+# 实验模型（Qwen3.5 9B）在基线抽取阶段使用这些提示。"baseline" 变体表示纯 LLM
+# 抽取，不含依存句法约束或 Reflexion 纠错。
 extraction:
 
   baseline:
-    # system: Defines the extraction agent persona.  Unlike the annotator,
-    # this agent focuses on extracting from a single sentence at a time and
-    # does not receive few-shot examples (zero-shot baseline).
+    # system：定义抽取智能体人设。与标注器不同，该智能体逐句抽取，不接收少样本示例（零样本基线）。
     system: |
       You are a legal information extraction agent.  Your task is to read
       sentences from contracts and extract structured predicate-argument-
@@ -220,7 +207,7 @@ extraction:
       If the sentence contains no legal predicate-argument structure,
       return an empty array [].
 
-    # user: Instance-level prompt for baseline extraction.
+    # user：基线抽取的实例级提示。
     user: |
       Extract predicate-argument-condition triples from the following
       contract sentence.
@@ -230,23 +217,18 @@ extraction:
       Return ONLY a JSON array.  No additional text.
 
 # ---------------------------------------------------------------------------
-# 3. Reflexion Correction Prompts
+# 3. Reflexion 纠错提示
 # ---------------------------------------------------------------------------
-# Reflexion is a self-correction loop: after the baseline extraction, the
-# system compares the output against dependency-parse constraints and
-# generates structured error hints.  The same experiment model then
-# receives these hints and produces a corrected output.
+# Reflexion 为自纠错循环：基线抽取后，系统将输出与依存句法约束比较并生成结构化错误提示。
+# 同一实验模型接收这些提示并产生修正输出。
 #
-# The feedback template wraps the error hints into a revision request.
-# The error_hints map provides detailed, category-specific guidance that
-# is appended to the feedback when a matching error is detected.
+# 反馈模板将错误提示包装为修订请求。error_hints 映射提供按类别细化的指导，
+# 在检测到匹配错误时追加到反馈中。
 reflexion:
 
-  # feedback_template: The wrapper prompt for Reflexion correction.
-  # {original_sentence}, {previous_output}, and {error_feedback} are
-  # substituted at runtime.  The model is instructed to produce a
-  # corrected JSON array while preserving parts of the original output
-  # that were already correct.
+  # feedback_template：Reflexion 纠错的包装提示。运行时替换占位符：
+  #   {error_type}、{text}、{prediction}、{linguistic_evidence}、{specific_hint}
+  # 指示模型产出修正后的 JSON 对象，同时保留原输出中已正确的部分。
   feedback_template: |
     You are re-analyzing a legal contract clause because your previous extraction
     contained errors identified by a syntactic validator.
@@ -280,18 +262,14 @@ reflexion:
     Preserve any parts of your original extraction that were CORRECT.
     Only fix the fields identified in the error type and correction guidance.
 
-  # error_hints: Category-specific guidance appended to the feedback when
-  # the constraint validator detects a mismatch.  Each hint explains what
-  # went wrong and how to fix it, with concrete examples drawn from the
-  # dependency parse.
+  # error_hints：约束验证器检测到不匹配时追加到反馈的按类别指导。各提示说明
+  # 出错原因及修正方法，并附依存句法分析中的具体示例。
 
   error_hints:
 
-    # passive_subject: Triggered when the model assigns the wrong semantic
-    # role to the subject of a passive construction.  For example, in
-    # "The goods shall be delivered by the Seller", the subject "The goods"
-    # is the patient (object), not the agent (obligor).  The agent is in
-    # the "by"-phrase.
+    # passive_subject：模型对被动构造主语赋予错误语义角色时触发。例如在
+    # "The goods shall be delivered by the Seller" 中，主语 "The goods" 是受事（宾语），
+    # 非施事（obligor）。施事在 "by" 短语中。
     passive_subject: |
       Passive voice error: The subject of a passive clause is the PATIENT
       (the entity acted upon), not the AGENT.  The agent appears in a
@@ -304,9 +282,8 @@ reflexion:
       Assign the AGENT role to the `obl:agent` dependent, not the
       `nsubj:pass` dependent.
 
-    # passive_object: Triggered when the model fails to extract the object
-    # from a passive construction or assigns it incorrectly.  In passive
-    # voice, the grammatical subject IS the logical object.
+    # passive_object：模型未能从被动构造抽取宾语或赋值错误时触发。被动语态中
+    # 语法主语即逻辑宾语。
     passive_object: |
       Passive object error: In passive voice, the grammatical subject
       (dependency relation `nsubj:pass`) is the logical OBJECT of the action.
@@ -314,10 +291,8 @@ reflexion:
       Only the agent in the "by"-phrase (`obl:agent`) should be the subject.
       Correct your extraction to reflect this inversion.
 
-    # condition_boundary: Triggered when the model truncates or over-extends
-    # a condition clause.  Conditions introduced by markers like "if",
-    # "unless", "provided that" may span multiple clauses; the model must
-    # include the full scope.
+    # condition_boundary：模型截断或过度扩展条件从句时触发。由 "if"、"unless"、
+    # "provided that" 等引入的条件可能跨多个从句；模型须包含完整范围。
     condition_boundary: |
       Condition boundary error: The extracted condition text does not cover
       the full condition clause.  Condition clauses introduced by markers
@@ -327,10 +302,8 @@ reflexion:
       clause) relation from the marker to the full clause extent.  Include
       all conjuncts (`conj`) attached to the condition head.
 
-    # long_distance_object: Triggered when the object of a predicate is
-    # separated from the verb by intervening material (relative clauses,
-    # prepositional phrases, appositives).  The model may latch onto a
-    # nearby noun instead of the true object.
+    # long_distance_object：谓词宾语与动词被插入成分（关系从句、介词短语、同位语）
+    # 隔开时触发。模型可能误取邻近名词而非真宾语。
     long_distance_object: |
       Long-distance dependency error: The object is separated from its
       predicate by intervening clauses or phrases.  Use the dependency
@@ -339,9 +312,7 @@ reflexion:
       dependency arc from the predicate head to its object dependent,
       regardless of linear distance.
 
-    # negation_role: Triggered when negation is present but the model
-    # assigns the wrong deontic role (e.g., marking an obligor when the
-    # clause actually expresses a prohibition).
+    # negation_role：存在否定但模型赋予错误道义角色时触发（如将禁止标为 obligor）。
     negation_role: |
       Negation role error: The clause contains negation (e.g., "shall not",
       "may not", "no party shall").  Negation typically converts an
@@ -350,9 +321,8 @@ reflexion:
         - Check for `neg` and `advmod` dependency relations on the predicate.
       Re-assign the subject role accordingly.
 
-    # role_mismatch: Triggered when the extracted subject role contradicts
-    # the modality of the predicate (e.g., "obligor" with a permissive
-    # "may" or "right_holder" with a mandatory "shall").
+    # role_mismatch：抽取的主语角色与谓词情态矛盾时触发（如 permissive "may" 标为 obligor，
+    # 或 mandatory "shall" 标为 right_holder）。
     role_mismatch: |
       Role mismatch error: The subject's semantic role does not match the
       modality expressed by the predicate auxiliary.
@@ -363,3 +333,14 @@ reflexion:
         - "must not"              → subject is typically "prohibited_party"
       Check the auxiliary verb (`aux`) dependency relation and re-assign
       the subject role to align with the modality.
+
+    # default：存在纠错但未匹配到具体错误类别时的回退。ReflexionGenerator 初始化所需。
+    default: |
+      General extraction error: Your previous output did not align with the
+      Universal Dependencies syntactic analysis of this clause.  Re-read the
+      original clause text and the linguistic evidence below.  Identify the
+      root predicate, its subject and object arguments (respecting passive
+      voice if aux:pass / nsubj:pass are present), any condition clause
+      introduced by subordinating markers, and the correct deontic role from
+      modal auxiliaries and negation.  Return a corrected JSON triplet,
+      preserving fields that were already correct.

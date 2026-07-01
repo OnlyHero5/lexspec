@@ -1,9 +1,8 @@
 """
-Text Matching and Normalization Utilities
+文本匹配与规范化工具
 ==========================================
-Self-contained utilities for comparing LLM-extracted text against UD tokens.
-These are extracted from the ConstraintValidator to keep that module focused
-on the core validation algorithm.
+用于将大语言模型抽取文本与 UD 词元比对的自包含工具函数。
+从 ConstraintValidator 中提取，以保持该模块专注于核心校验算法。
 """
 
 from __future__ import annotations
@@ -20,80 +19,78 @@ logger = get_logger(__name__)
 
 
 def normalize_text(text: str) -> str:
-    """Normalize text for comparison.
+    """规范化文本以便比对。
 
-    Steps applied in order:
-    1. Lowercase the entire string.
-    2. Remove leading articles: "the Seller" -> "seller",
-       "a Party" -> "party", "an Agreement" -> "agreement".
-    3. Remove trailing punctuation: periods, commas, semicolons.
-    4. Collapse multiple whitespace characters to single space.
-    5. Strip leading/trailing whitespace.
+    按顺序执行以下步骤：
+    1. 将整个字符串转为小写。
+    2. 去除前导冠词："the Seller" -> "seller"，
+       "a Party" -> "party"，"an Agreement" -> "agreement"。
+    3. 去除尾部标点：句号、逗号、分号等。
+    4. 将多个空白字符合并为单个空格。
+    5. 去除首尾空白。
 
-    This normalization ensures that superficial differences in
-    capitalization, articles, and punctuation do not cause false
-    mismatch detections. The goal is to compare semantic content,
-    not surface form.
+    此规范化确保大小写、冠词和标点等表层差异
+    不会导致误报不匹配。目标是比对语义内容，
+    而非表层形式。
 
-    Args:
-        text: Raw text string from LLM or UD.
+    参数：
+        text: 来自大语言模型或 UD 的原始文本字符串。
 
-    Returns:
-        Normalized text suitable for comparison.
+    返回：
+        适用于比对的规范化文本。
     """
     if not text:
         return ""
 
     normalized = text.lower().strip()
 
-    # Remove leading articles ("the", "a", "an").
-    # We use word-boundary check to avoid removing "the" from
-    # the middle of words (e.g., "theory").
+    # 去除前导冠词（"the"、"a"、"an"）。
+    # 使用词边界检查，避免从词中间去除 "the"
+    #（例如 "theory"）。
     normalized = re.sub(
         r'^\s*(the|a|an)\s+', '', normalized, count=1
     )
 
-    # Remove trailing punctuation.
+    # 去除尾部标点。
     normalized = normalized.rstrip(".,;:!?\"'()[]{}")
 
-    # Collapse whitespace.
+    # 合并空白。
     normalized = re.sub(r'\s+', ' ', normalized)
 
-    # Final strip.
+    # 最终去除首尾空白。
     normalized = normalized.strip()
 
     return normalized
 
 
 def match_text(llm_text: str, ud_token: "Token") -> bool:
-    """Check if LLM-extracted text matches a UD token.
+    """检查大语言模型抽取文本是否与 UD 词元匹配。
 
-    Matching is performed after normalization (lowercase, strip
-    articles, strip punctuation). We check:
+    在规范化（小写、去除冠词、去除标点）后进行匹配。检查：
 
-    1. Exact match after normalization of both sides.
-    2. Substring match: the UD token text is a substring of the
-       LLM text (handles coordination expansions like "Buyer and
-       Seller" matching UD "Buyer") or vice versa.
-    3. Token overlap: both strings share at least one content word
-       (noun, verb, adjective). This catches cases where the LLM
-       extracted a longer NP but the head noun matches the UD token.
+    1. 双方规范化后的精确匹配。
+    2. 子串匹配：UD 词元文本是大语言模型文本的子串
+       （处理并列扩展，如 "Buyer and Seller" 匹配 UD "Buyer"），
+       或反之。
+    3. 词元重叠：两字符串至少共享一个实词
+       （名词、动词、形容词）。适用于大语言模型抽取了
+       更长的名词短语但中心名词与 UD 词元匹配的情况。
 
-    Args:
-        llm_text: Text from LLM extraction.
-        ud_token: Token from UD parse.
+    参数：
+        llm_text: 大语言模型抽取的文本。
+        ud_token: UD 解析中的词元。
 
-    Returns:
-        True if texts match after normalization.
+    返回：
+        规范化后文本匹配则返回 True。
     """
     llm_norm = normalize_text(llm_text)
     ud_norm = normalize_text(ud_token.text)
 
-    # Exact match after normalization.
+    # 规范化后精确匹配。
     if llm_norm == ud_norm:
         return True
 
-    # Substring match (handles coordination and NP expansion).
+    # 子串匹配（处理并列与名词短语扩展）。
     if ud_norm in llm_norm or llm_norm in ud_norm:
         logger.debug(
             "Substring match: LLM='%s' contains UD='%s'",
@@ -101,12 +98,12 @@ def match_text(llm_text: str, ud_token: "Token") -> bool:
         )
         return True
 
-    # Token overlap: split both into word sets and check for
-    # at least one common content word.
+    # 词元重叠：将双方拆分为词集，检查是否
+    # 至少有一个共同的实词。
     llm_words = set(llm_norm.split())
     ud_words = set(ud_norm.split())
 
-    # Remove function words from consideration.
+    # 从考虑范围中排除功能词。
     function_words = {
         "the", "a", "an", "of", "in", "to", "for", "on", "at",
         "by", "with", "from", "and", "or", "not", "no", "any",

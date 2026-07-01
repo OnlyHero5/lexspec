@@ -1,10 +1,9 @@
 """
-Annotation Statistics Generator
-================================
-Computes inter-annotator agreement metrics at both the triplet level
-(full agreement vs. partial/full disagreement) and the field level
-(per-field agreement rates). Also computes disagreement distribution
-by linguistic phenomenon for diagnostic purposes.
+标注统计生成器
+==============
+在三元组层面（完全一致 vs 部分/完全不一致）与
+字段层面（各字段一致率）计算标注者间一致性指标。
+并按语言现象统计分歧分布，用于诊断。
 """
 
 from __future__ import annotations
@@ -29,35 +28,34 @@ def generate_annotation_stats(
     annotations_gemma: List[LegalTriplet],
     gold: List[LegalTriplet],
 ) -> Dict[str, Any]:
-    """Generate annotation statistics report.
+    """生成标注统计报告。
 
-    Computes inter-annotator agreement metrics at both the triplet level
-    (full agreement vs. partial/full disagreement) and the field level
-    (per-field agreement rates). Also computes disagreement distribution
-    by linguistic phenomenon for diagnostic purposes.
+    在三元组层面（完全一致 vs 部分/完全不一致）与
+    字段层面（各字段一致率）计算标注者间一致性。
+    并按语言现象统计分歧分布，用于诊断。
 
-    Args:
-        annotations_qwen: List of annotations from the Qwen model.
-        annotations_gemma: List of annotations from the Gemma model.
-        gold: List of final gold-standard triplets.
+    参数：
+        annotations_qwen: Qwen 模型标注列表。
+        annotations_gemma: Gemma 模型标注列表。
+        gold: 最终金标准三元组列表。
 
-    Returns:
-        Statistics dict with the following keys:
-          - "total_clauses": int, total number of annotated clauses
-          - "full_agreement_count": int, number of clauses where Qwen
-            and Gemma produced identical triplets (all 6 fields agree)
-          - "full_agreement_rate": float, full_agreement_count / total_clauses
-          - "field_agreement": dict[str, float], per-field agreement rates
-            for each of the 6 fields
-          - "disagreement_by_phenomenon": dict[str, int], counts of
-            disagreement types by linguistic phenomenon (passive_voice,
-            condition_boundary, negation, role_mismatch, etc.)
-          - "qwen_gold_agreement_rate": float, full agreement rate between
-            Qwen annotations and the final gold
-          - "gemma_gold_agreement_rate": float, full agreement rate between
-            Gemma annotations and the final gold
+    返回：
+        统计 dict，键包括：
+          - "total_clauses": int，已标注条款总数
+          - "full_agreement_count": int，Qwen 与 Gemma
+            产出完全相同三元组的条款数（6 字段均一致）
+          - "full_agreement_rate": float，full_agreement_count / total_clauses
+          - "field_agreement": dict[str, float]，6 个字段各自的
+            一致率
+          - "disagreement_by_phenomenon": dict[str, int]，按语言现象
+            统计的分歧类型计数（passive_voice、
+            condition_boundary、negation、role_mismatch 等）
+          - "qwen_gold_agreement_rate": float，Qwen 标注与
+            最终金标准的完全一致率
+          - "gemma_gold_agreement_rate": float，Gemma 标注与
+            最终金标准的完全一致率
     """
-    # Validate input lengths match.
+    # 校验输入长度一致。
     total = len(annotations_qwen)
     if len(annotations_gemma) != total or len(gold) != total:
         logger.error(
@@ -82,14 +80,14 @@ def generate_annotation_stats(
             "gemma_gold_agreement_rate": 0.0,
         }
 
-    # --- Full Agreement (triplet-level) ---
-    # A triplet is in full agreement only if all 6 fields agree.
+    # --- 完全一致（三元组层面）---
+    # 仅当 6 个字段全部一致时视为三元组完全一致。
     full_agreement_count = 0
-    # Per-field agreement counters.
+    # 各字段一致计数。
     field_agreement_counts = {field_name: 0 for field_name, _, _ in FIELD_SPEC}
-    # Per-phenomenon disagreement counters.
+    # 按现象统计的分歧计数。
     phenomenon_counts: Dict[str, int] = {}
-    # Model-gold agreement counters.
+    # 模型-金标准一致计数。
     qwen_gold_agreement = 0
     gemma_gold_agreement = 0
 
@@ -98,22 +96,21 @@ def generate_annotation_stats(
         gemma_anno = annotations_gemma[i]
         gold_triplet = gold[i]
 
-        # Compare Qwen vs Gemma field by field.
+        # 逐字段比较 Qwen 与 Gemma。
         consensus, disagreements = field_level_consensus(qwen_anno, gemma_anno)
 
-        # Track full agreement.
+        # 统计完全一致。
         if len(disagreements) == 0:
             full_agreement_count += 1
 
-        # Track per-field agreement (6 fields per clause).
-        # We already know which fields disagreed from the consensus call.
-        # All fields except those in disagreements are agreed.
+        # 统计各字段一致（每条款 6 个字段）。
+        # 共识调用已给出不一致字段；其余视为一致。
         disagreed_field_names = {d["field"] for d in disagreements}
         for field_name, _, _ in FIELD_SPEC:
             if field_name not in disagreed_field_names:
                 field_agreement_counts[field_name] += 1
 
-        # Track phenomenon-level disagreement patterns.
+        # 按现象统计分歧模式。
         for d in disagreements:
             phenomenon = _classify_disagreement_phenomenon(
                 d["field"],
@@ -122,13 +119,13 @@ def generate_annotation_stats(
             )
             phenomenon_counts[phenomenon] = phenomenon_counts.get(phenomenon, 0) + 1
 
-        # Track model-gold agreement (triplet-level).
+        # 统计模型-金标准一致（三元组层面）。
         if _triplets_equal(qwen_anno, gold_triplet):
             qwen_gold_agreement += 1
         if _triplets_equal(gemma_anno, gold_triplet):
             gemma_gold_agreement += 1
 
-    # Compute rates from counts.
+    # 由计数计算比率。
     field_agreement_rates: Dict[str, float] = {}
     for field_name, _, _ in FIELD_SPEC:
         field_agreement_rates[field_name] = (

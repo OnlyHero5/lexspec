@@ -1,35 +1,35 @@
 """
-LexSpec Linguistic Constraint Module
+LexSpec 语言学约束模块
 =====================================
-The CORE of the LexSpec project — Universal Dependencies (UD) syntactic
-constraints as a post-hoc validator for LLM-extracted legal triplets.
+LexSpec 项目的核心 —— 以通用依存句法（UD）约束作为大语言模型
+抽取法律三元组的事后校验器。
 
-This package provides the complete linguistic analysis pipeline:
-  1. StanzaParser:      Wraps Stanza for UD dependency parsing of legal text.
-  2. UDFeatureExtractor: Extracts syntactic features from UD trees that map
-                         to legal triplet fields (subject, object, condition).
-  3. PassiveDetector:   Detects passive voice and restores semantic argument
-                         mapping (agent/patient) from surface syntax.
-  4. ConditionExtractor: Extracts condition clause boundaries using advcl+mark
-                         patterns and classifies by legal-domain taxonomy.
-  5. PolarityDetector:  Detects modal auxiliaries and negation to classify
-                         the legal role (obligor, right_holder, etc.).
-  6. ConstraintValidator: The CORE ALGORITHM — a 7-step validator that compares
-                         LLM triplets against UD syntactic structure, producing
-                         validated, corrected, or Reflexion-flagged output.
+本包提供完整的语言学分析流水线：
+  1. StanzaParser:      封装 Stanza，对法律文本进行 UD 依存解析。
+  2. UDFeatureExtractor: 从 UD 树中提取映射到法律三元组字段
+                         （主语、宾语、条件）的句法特征。
+  3. PassiveDetector:   检测被动语态，从表层句法恢复语义论元
+                         映射（施事/受事）。
+  4. ConditionExtractor: 利用 advcl+mark 模式提取条件从句边界，
+                         并按法律领域分类体系分类。
+  5. PolarityDetector:  检测情态助动词与否定，分类法律角色
+                         （义务方、权利方等）。
+  6. ConstraintValidator: 核心算法 —— 七步校验器，将大语言模型
+                         三元组与 UD 句法结构比对，产出已校验、
+                         已修正或需 Reflexion 标记的输出。
 
-Design Principle:
-  All modules consume DependencyTree objects from src.extraction.schema.
-  No raw Stanza objects are exposed outside this package. This isolation
-  allows the parser backend to be swapped without affecting any downstream
-  code.
+设计原则：
+  所有模块消费来自 src.extraction.schema 的 DependencyTree 对象。
+  本包外部不暴露原始 Stanza 对象。此隔离使解析后端可替换，
+  而不影响任何下游代码。
 
-UD Theory Foundation:
+UD 理论基础：
   - de Marneffe & Manning (2014). Stanford Typed Dependencies Manual.
   - Nivre et al. (2020). Universal Dependencies v2 Guidelines.
   - Tesnière (1959). Éléments de syntaxe structurale.
 
-Usage:
+使用示例::
+
     from src.linguistic import StanzaParser, ConstraintValidator
     parser = StanzaParser()
     validator = ConstraintValidator(parser=parser)

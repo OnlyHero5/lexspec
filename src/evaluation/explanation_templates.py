@@ -1,10 +1,10 @@
 """
-Linguistic explanation template functions for error cases.
+错误案例的语言学解释模板函数。
 
-Each function appends bilingual (Chinese + English) explanations to a parts list,
-citing specific UD relations and syntactic structures that caused extraction errors.
+各函数向 parts 列表追加中英双语解释，
+引用导致抽取错误的具体 UD 关系与句法结构。
 
-All functions have the same signature:
+全部函数签名相同：
     (parts, prediction, gold, tree, evidence) -> None
 """
 
@@ -24,7 +24,7 @@ def add_passive_explanation(
     tree: Optional[DependencyTree],
     evidence: Dict[str, Any],
 ) -> None:
-    """Append passive voice specific explanation to parts list."""
+    """向 parts 列表追加被动语态专用解释。"""
     parts.append(
         "**中文**: 该句为被动语态结构。在被动句中，句法主语(nsubj:pass)是受事者(patient)，"
         "而非施事者(agent)。系统错误地将受事者识别为法律主体，而忽略了由obl:agent标记的"
@@ -63,7 +63,7 @@ def add_condition_explanation(
     tree: Optional[DependencyTree],
     evidence: Dict[str, Any],
 ) -> None:
-    """Append conditional boundary specific explanation to parts list."""
+    """向 parts 列表追加条件边界专用解释。"""
     parts.append(
         "**中文**: 系统未能正确识别条件从句的边界。条件从句由advcl依存关系标记，其范围"
         "包括从属连词(mark)引导的整个从句。系统的提取要么遗漏了条件从句的部分内容，"
@@ -95,7 +95,7 @@ def add_relcl_explanation(
     tree: Optional[DependencyTree],
     evidence: Dict[str, Any],
 ) -> None:
-    """Append relative clause specific explanation to parts list."""
+    """向 parts 列表追加关系从句专用解释。"""
     parts.append(
         "**中文**: 句中包含关系从句(acl:relcl)，该从句内嵌了另一个谓词-论元结构。"
         "系统可能从关系从句内部提取了谓词或宾语，而非从主句中提取正确的法律行为要素。"
@@ -127,7 +127,7 @@ def add_long_distance_explanation(
     tree: Optional[DependencyTree],
     evidence: Dict[str, Any],
 ) -> None:
-    """Append long-distance dependency specific explanation to parts list."""
+    """向 parts 列表追加长距离依存专用解释。"""
     dist = evidence.get("distance", "?")
     parts.append(
         f"**中文**: 谓词与其论元之间的依存距离为 {dist} 个词(token)，超过正常范围(≤3)。"
@@ -167,7 +167,7 @@ def add_negation_explanation(
     tree: Optional[DependencyTree],
     evidence: Dict[str, Any],
 ) -> None:
-    """Append negation/exception specific explanation to parts list."""
+    """向 parts 列表追加否定/例外专用解释。"""
     parts.append(
         "**中文**: 句中存在否定标记(neg)或例外条件(exception condition)，这些成分"
         "改变了法律主体的角色分类。否定/例外通常将义务方(obligor)转换为被禁止方"
@@ -201,7 +201,7 @@ def add_generic_explanation(
     tree: Optional[DependencyTree],
     evidence: Dict[str, Any],
 ) -> None:
-    """Append generic (other) error explanation to parts list."""
+    """向 parts 列表追加通用（其他）错误解释。"""
     parts.append(
         "**中文**: 系统输出与金标存在差异，但未识别到特定的语言学现象。可能是由于"
         "多个因素共同作用导致的提取错误。请人工审查以确定根本原因。\n"

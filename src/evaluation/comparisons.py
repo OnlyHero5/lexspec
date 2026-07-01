@@ -1,8 +1,8 @@
 """
-Multi-experiment comparison and stratified significance testing.
+多实验比较与分层显著性检验。
 
-Provides run_all_comparisons() for pairwise comparisons across experiments
-and stratified_significance() for phenomenon-specific analysis.
+提供 run_all_comparisons() 用于实验间成对比较，
+以及 stratified_significance() 用于按现象分层分析。
 """
 
 from __future__ import annotations
@@ -22,45 +22,43 @@ def run_all_comparisons(
     n_resamples: int = 10000,
     random_seed: int = 42,
 ) -> Dict[str, Any]:
-    """Run all pairwise significance tests between experiments.
+    """在实验间运行全部成对显著性检验。
 
-    For a set of experiments (e.g., baseline, constrained, reflexion),
-    this function runs both bootstrap and Wilcoxon tests for every pair,
-    producing a comprehensive comparison matrix.
+    对一组实验（如 baseline、constrained、reflexion），
+    对每一对同时运行 bootstrap 与 Wilcoxon 检验，
+    生成完整比较矩阵。
 
-    The results are structured for easy inclusion in evaluation reports
-    and tables. Each comparison is keyed by "A_vs_B" where A and B are
-    the experiment names.
+    结果结构便于写入评估报告与表格。每对比较键为 "A_vs_B"，
+    A、B 为实验名。
 
-    Args:
-        experiment_results: Dict mapping experiment name to list of per-sample
-                            scores. e.g., {"baseline": [0.3, 0.4, ...],
-                                          "constrained": [0.5, 0.6, ...]}
-        experiment_names: Optional ordered list of experiment names. If None,
-                          uses sorted keys from experiment_results.
-        n_resamples: Number of bootstrap resamples per comparison.
-        random_seed: Random seed for reproducibility.
+    参数:
+        experiment_results: 实验名 -> 逐样本得分列表 的映射。
+                            例如 {"baseline": [0.3, 0.4, ...],
+                                  "constrained": [0.5, 0.6, ...]}
+        experiment_names: 可选实验名有序列表。为 None 时使用
+                          experiment_results 的排序键。
+        n_resamples: 每次比较的 bootstrap 重采样次数。
+        random_seed: 随机种子以保证可复现。
 
-    Returns:
-        Dict with keys:
-        - comparisons: Dict[str, Dict] — per-pair comparison results.
-          Each value contains "bootstrap" and "wilcoxon" sub-dicts.
-        - summary: Dict with a matrix view of significance results.
-        - n_pairs: int — number of paired samples per experiment.
+    返回:
+        字典，键包括：
+        - comparisons: Dict[str, Dict] — 各对比较结果。
+          每项含 "bootstrap" 与 "wilcoxon" 子字典。
+        - summary: Dict — 显著性结果矩阵视图。
+        - n_pairs: int — 每个实验的配对样本数。
 
-    Raises:
-        ValueError: If fewer than 2 experiments are provided, or if scores
-                    have different lengths across experiments.
+    异常:
+        ValueError: 实验少于 2 个，或各实验得分长度不一致。
     """
     if len(experiment_results) < 2:
         raise ValueError(
             f"Need at least 2 experiments for comparison. Got {len(experiment_results)}."
         )
 
-    # Determine experiment order.
+    # 确定实验顺序。
     names = experiment_names if experiment_names else sorted(experiment_results.keys())
 
-    # Validate that all experiments have the same number of samples.
+    # 校验各实验样本数相同。
     n_pairs = None
     for name in names:
         if name not in experiment_results:
@@ -76,7 +74,7 @@ def run_all_comparisons(
 
     comparisons: Dict[str, Dict] = {}
 
-    # Run all pairwise comparisons.
+    # 运行全部成对比较。
     for i in range(len(names)):
         for j in range(i + 1, len(names)):
             name_a = names[i]
@@ -109,8 +107,8 @@ def run_all_comparisons(
                 "wilcoxon": wilcoxon_result,
             }
 
-    # Build a significance matrix for the summary.
-    # Rows and columns are experiment names; cells are significance indicators.
+    # 构建摘要显著性矩阵。
+    # 行列为实验名；单元格为显著性指示。
     sig_matrix: Dict[str, Dict[str, str]] = {}
     for name in names:
         sig_matrix[name] = {}
@@ -118,14 +116,14 @@ def run_all_comparisons(
             if name == other:
                 sig_matrix[name][other] = "-"
             else:
-                # Find the comparison key (order-independent).
+                # 查找比较键（与顺序无关）。
                 key1 = f"{name}_vs_{other}"
                 key2 = f"{other}_vs_{name}"
                 comp = comparisons.get(key1) or comparisons.get(key2)
                 if comp and "bootstrap" in comp and not isinstance(comp["bootstrap"].get("significant_at_0.05"), str):
                     bs = comp["bootstrap"]
                     if bs.get("significant_at_0.05", False):
-                        # Determine direction: does the second experiment win?
+                        # 判断方向：第二个实验是否更优？
                         mean_diff = bs.get("mean_diff", 0)
                         if key1 in comparisons:
                             direction = ">" if mean_diff > 0 else "<"
@@ -158,38 +156,33 @@ def stratified_significance(
     n_resamples: int = 10000,
     random_seed: int = 42,
 ) -> Dict[str, Any]:
-    """Run significance test on a specific linguistic phenomenon subset.
+    """在指定语言学现象子集上运行显著性检验。
 
-    This allows fine-grained comparison: "Does system B outperform system A
-    specifically on passive voice constructions?" or "Is the improvement
-    limited to long-distance dependencies?"
+    支持细粒度比较，例如「系统 B 是否在被动语态上优于 A？」
+    或「提升是否限于长距离依存？」
 
-    The function filters the per-sample scores to only those samples that
-    exhibit the specified linguistic phenomenon, then runs the paired
-    bootstrap test on the filtered subset.
+    将逐样本得分过滤为仅含指定现象的样本，
+    再在过滤子集上运行配对 bootstrap。
 
-    Args:
-        scores_a: Full per-sample scores for system A.
-        scores_b: Full per-sample scores for system B.
-        phenomenon_labels: Per-sample labels indicating which phenomenon
-                           each sample exhibits. Must be the same length
-                           as scores_a and scores_b. Labels are typically
-                           from ErrorCategory enum values or custom tags.
-        phenomenon_name: Which phenomenon value to filter by. Only samples
-                         with this label are included in the test.
-        n_resamples: Number of bootstrap resamples.
-        random_seed: Random seed for reproducibility.
+    参数:
+        scores_a: 系统 A 的完整逐样本得分。
+        scores_b: 系统 B 的完整逐样本得分。
+        phenomenon_labels: 逐样本标签，表示各样本所属现象。
+                           须与 scores_a、scores_b 等长。标签通常来自
+                           ErrorCategory 枚举值或自定义标记。
+        phenomenon_name: 要过滤的现象值。仅含该标签的样本参与检验。
+        n_resamples: bootstrap 重采样次数。
+        random_seed: 随机种子以保证可复现。
 
-    Returns:
-        Dict with the bootstrap result for the filtered subset, plus:
-        - phenomenon: str — the phenomenon name.
-        - subset_size: int — number of samples with this phenomenon.
-        - total_size: int — total number of samples.
-        - subset_ratio: float — proportion of samples with this phenomenon.
+    返回:
+        过滤子集的 bootstrap 结果，并附加：
+        - phenomenon: str — 现象名。
+        - subset_size: int — 该现象样本数。
+        - total_size: int — 总样本数。
+        - subset_ratio: float — 该现象样本占比。
 
-    Raises:
-        ValueError: If input lengths don't match or if no samples match
-                    the specified phenomenon.
+    异常:
+        ValueError: 输入长度不一致，或无样本匹配指定现象。
     """
     n = len(scores_a)
     if len(scores_b) != n or len(phenomenon_labels) != n:
@@ -199,7 +192,7 @@ def stratified_significance(
             f"labels={len(phenomenon_labels)}."
         )
 
-    # Filter to the specified phenomenon.
+    # 过滤为指定现象。
     filtered_a = []
     filtered_b = []
     for sa, sb, label in zip(scores_a, scores_b, phenomenon_labels):
@@ -214,7 +207,7 @@ def stratified_significance(
             f"Available labels: {sorted(set(phenomenon_labels))}"
         )
 
-    # Run bootstrap on the filtered subset.
+    # 在过滤子集上运行 bootstrap。
     bootstrap_result = paired_bootstrap(
         filtered_a, filtered_b,
         n_resamples=n_resamples,

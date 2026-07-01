@@ -1,8 +1,7 @@
 """
-Result-building utilities: LinguisticEvidence, feedback, and correction application.
+结果构建工具：LinguisticEvidence、反馈与修正应用。
 
-These functions construct the ValidationResult sub-objects from the
-accumulated validation state.
+这些函数从累积的校验状态构建 ValidationResult 子对象。
 """
 
 from __future__ import annotations
@@ -38,15 +37,9 @@ def build_linguistic_evidence(
     polarity: str,
     legal_role: LegalRole,
 ) -> LinguisticEvidence:
-    """Build the LinguisticEvidence object from validation state.
-
-    This evidence object captures everything the validator derived
-    from the UD parse, providing the ground-truth reference against
-    which the LLM prediction was compared. It is included in the
-    final ValidationResult for transparency and is used by the
-    error analyzer for generating linguistic explanations.
-    """
+    """从校验状态构建 LinguisticEvidence 对象。"""
     predicate_token = tree.get_token(predicate_idx)
+    max_argument_distance = _max_argument_distance(tree, predicate_idx)
 
     evidence = LinguisticEvidence(
         predicate=predicate_token.lemma if predicate_token else "",
@@ -62,35 +55,46 @@ def build_linguistic_evidence(
         modality_aux=modality_aux,
         polarity=polarity,
         legal_role=legal_role,
+        max_argument_distance=max_argument_distance,
     )
 
     return evidence
 
 
+def _max_argument_distance(tree: DependencyTree, predicate_idx: int) -> int:
+    """计算谓词到主语/宾语论元的最大依存距离。"""
+    if predicate_idx <= 0:
+        return 0
+    max_dist = 0
+    for deprel in ("nsubj", "nsubj:pass", "obj"):
+        for child in tree.get_children(predicate_idx, deprel=deprel):
+            dist = tree.get_dependency_distance(child.index, predicate_idx)
+            max_dist = max(max_dist, dist)
+    return max_dist
+
+
 def build_feedback(feedback_parts: List[str]) -> str:
-    """Assemble human-readable feedback string.
+    """组装人类可读的反馈字符串。
 
-    Used in two contexts:
-      1. Reflexion: The feedback is included in the Reflexion prompt
-         sent back to the LLM, telling it what went wrong and how to
-         re-analyze the clause.
-      2. Error analysis: The feedback is logged in error case records
-         for downstream diagnostic reporting.
+    用于两种场景：
+      1. Reflexion：反馈包含在发回大语言模型的 Reflexion 提示中，
+         说明错误及如何重新分析从句。
+      2. 错误分析：反馈记录在错误案例记录中，
+         供下游诊断报告使用。
 
-    The feedback uses natural language and cites specific UD relations
-    to help the LLM understand what syntactic patterns to look for.
+    反馈使用自然语言并引用具体 UD 关系，
+    帮助大语言模型理解应关注的句法模式。
 
-    Args:
-        feedback_parts: List of individual feedback strings from
-                        each validation step.
+    参数：
+        feedback_parts: 各校验步骤产生的单条反馈字符串列表。
 
-    Returns:
-        Concatenated feedback string, or empty string if no issues.
+    返回：
+        拼接后的反馈字符串，无问题时为空字符串。
     """
     if not feedback_parts:
         return ""
 
-    # Number each feedback item for clarity.
+    # 为每条反馈编号以便阅读。
     numbered = [
         f"{i}. {part}" for i, part in enumerate(feedback_parts, 1)
     ]
@@ -107,29 +111,28 @@ def apply_corrections(
     triplet: LegalTriplet,
     corrections: List[FieldCorrection],
 ) -> LegalTriplet:
-    """Apply a list of field corrections to produce a corrected triplet.
+    """应用字段修正列表以产出修正后的三元组。
 
-    Iterates over all field corrections and updates the corresponding
-    fields in the triplet. The corrected triplet is a new LegalTriplet
-    object — the original is never mutated.
+    遍历全部字段修正并更新三元组对应字段。
+    修正后的三元组为新的 LegalTriplet 对象 —— 原始对象从不修改。
 
-    Field paths handled:
+    处理的字段路径：
       - "subject.text" -> triplet.subject.text
-      - "subject.role" -> triplet.subject.role (converted from string)
+      - "subject.role" -> triplet.subject.role（由字符串转换）
       - "action.object" -> triplet.action.object
       - "action.predicate" -> triplet.action.predicate
       - "condition.text" -> triplet.condition.text
-      - "condition.type" -> triplet.condition.type (converted from string)
+      - "condition.type" -> triplet.condition.type（由字符串转换）
 
-    Args:
-        triplet: The original LLM triplet (not mutated).
-        corrections: List of FieldCorrection objects.
+    参数：
+        triplet: 原始大语言模型三元组（不修改）。
+        corrections: FieldCorrection 对象列表。
 
-    Returns:
-        A new LegalTriplet with corrections applied.
+    返回：
+        应用修正后的新 LegalTriplet。
     """
-    # Start with a copy of the original triplet.
-    # We build new Subject, Action, Condition objects as needed.
+    # 从原始三元组副本开始。
+    # 按需构建新的 Subject、Action、Condition 对象。
     new_subject_text = triplet.subject.text
     new_subject_role = triplet.subject.role
     new_predicate = triplet.action.predicate
@@ -148,7 +151,7 @@ def apply_corrections(
                 correction.original, corrected_value,
             )
         elif field == "subject.role":
-            # Convert string role back to LegalRole enum.
+            # 将字符串角色转回 LegalRole 枚举。
             try:
                 new_subject_role = LegalRole(corrected_value)
                 logger.debug(

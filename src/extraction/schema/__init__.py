@@ -49,27 +49,27 @@ from .error import (
 )
 
 __all__ = [
-    # Enums
+    # 枚举
     "LegalRole",
     "ConditionType",
     "ValidationStatus",
     "ErrorCategory",
     "FieldErrorType",
-    # Core Triplet
+    # 核心三元组
     "Subject",
     "Action",
     "Condition",
     "LegalTriplet",
-    # Dependency
+    # 依存
     "Token",
     "ClauseSpan",
     "ConditionSpan",
     "DependencyTree",
-    # Validation
+    # 校验
     "LinguisticEvidence",
     "FieldCorrection",
     "ValidationResult",
-    # Error / Annotation
+    # 错误 / 标注
     "ErrorCase",
     "AnnotationDisagreement",
 ]

@@ -1,87 +1,86 @@
 """
-LexSpec Extraction Package
+LexSpec 抽取包
 ============================
 
-This package handles the extraction of legal triplets from contract clauses
-using LLM-based extraction with post-hoc validation via Universal Dependencies
-syntactic constraints.
+本包负责使用基于大语言模型的抽取方法，从合同条款中抽取法律三元组，
+并通过通用依存句法约束进行事后校验。
 
-Public API:
-  - LLM Client:       ClientConfig, LLMClient — OpenAI-compatible wrapper for
-                      llama.cpp remote inference with retries and structured output.
-  - Extractor:        LegalTripletExtractor — prompts the LLM and parses structured
-                      LegalTriplet responses with multi-strategy JSON parsing.
-  - Schema models:    Subject, Action, Condition, LegalTriplet, DependencyTree,
-                      ValidationResult, ErrorCase, AnnotationDisagreement
-  - Enums:            LegalRole, ConditionType, ValidationStatus, ErrorCategory,
+公开 API:
+  - 大语言模型客户端:  ClientConfig、LLMClient —— 兼容 OpenAI 的 llama.cpp
+                      远程推理封装，支持重试与结构化输出。
+  - 抽取器:            LegalTripletExtractor —— 调用大语言模型并解析结构化
+                      LegalTriplet 响应，采用多策略 JSON 解析。
+  - 模式模型:          Subject、Action、Condition、LegalTriplet、DependencyTree、
+                      ValidationResult、ErrorCase、AnnotationDisagreement
+  - 枚举:              LegalRole、ConditionType、ValidationStatus、ErrorCategory、
                       FieldErrorType
 """
 
-# --- Schema models (central data contracts) ---
+# --- 模式模型（核心数据契约）---
 from src.extraction.schema import (
-    # Core Triplet Models
+    # 核心三元组模型
     LegalTriplet,
     Subject,
     Action,
     Condition,
-    # Enums
+    # 枚举
     LegalRole,
     ConditionType,
     ValidationStatus,
     ErrorCategory,
     FieldErrorType,
-    # Linguistic Models
+    # 语言学模型
     Token,
     ClauseSpan,
     ConditionSpan,
     DependencyTree,
-    # Validation Models
+    # 校验模型
     LinguisticEvidence,
     FieldCorrection,
     ValidationResult,
-    # Annotation / Error Analysis
+    # 标注 / 错误分析
     ErrorCase,
     AnnotationDisagreement,
 )
 
-# --- LLM Client ---
+# --- 大语言模型客户端 ---
 from src.extraction.client import (
     ClientConfig,
     LLMClient,
 )
 
-# --- Extractor ---
+# --- 抽取器 ---
 from src.extraction.extractor import (
     LegalTripletExtractor,
 )
 
 __all__ = [
-    # Core Triplet
+    # 核心三元组
     "LegalTriplet",
     "Subject",
     "Action",
     "Condition",
-    # Enums
+    # 枚举
     "LegalRole",
     "ConditionType",
     "ValidationStatus",
     "ErrorCategory",
     "FieldErrorType",
-    # Linguistic
+    # 语言学
     "Token",
     "ClauseSpan",
     "ConditionSpan",
     "DependencyTree",
-    # Validation
+    # 校验
     "LinguisticEvidence",
     "FieldCorrection",
     "ValidationResult",
-    # Annotation / Error
+    # 标注 / 错误
     "ErrorCase",
     "AnnotationDisagreement",
-    # Client
+    # 客户端
     "ClientConfig",
     "LLMClient",
-    # Extractor
+    # 抽取器
     "LegalTripletExtractor",
 ]

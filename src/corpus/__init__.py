@@ -1,15 +1,15 @@
 """
-LexSpec Corpus Package
-======================
-Corpus construction from CUAD v1 contract data for LexSpec evaluation.
+LexSpec 语料库包
+================
+从 CUAD v1 合同数据构建 LexSpec 评估语料库。
 
-This package handles:
-  - Language phenomenon detection (passive, conditional, etc.) on UD parse trees
-  - Loading CUAD v1 data in multiple formats (full contracts, expert spans, QA spans)
-  - Clause extraction via Stanza sentence segmentation
-  - Test-set selection strategies (stratified sampling, full selection)
+本包负责：
+  - 在 UD parse 树上检测语言现象（被动、条件等）
+  - 以多种格式加载 CUAD v1（完整合同、专家片段、QA 片段）
+  - 通过 Stanza 分句提取条款
+  - 测试集选择策略（分层抽样、全量选择）
 
-Usage::
+用法::
 
     from src.corpus import (
         detect_phenomena, is_boilerplate_clause,

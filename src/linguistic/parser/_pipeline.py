@@ -1,7 +1,7 @@
 """
-Pipeline initialization for StanzaParser.
+StanzaParser 的流水线初始化。
 
-Contains the __init__ logic, nlp property, and is_available method.
+包含 __init__ 逻辑、nlp 属性及 is_available 方法。
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Module-level singleton — Stanza pipeline is expensive to initialize
-# (model loading, GPU allocation). We create it once and reuse.
+# 模块级单例 —— Stanza 流水线初始化代价高
+#（模型加载、GPU 分配）。创建一次后复用。
 # ---------------------------------------------------------------------------
 _nlp = None
 _nlp_initialized: bool = False
@@ -27,34 +27,29 @@ def _init_pipeline(
     download_method: str = "REUSE_RESOURCES",
     use_gpu: bool = True,
 ):
-    """Initialize the Stanza pipeline.
+    """初始化 Stanza 流水线。
 
-    On first instantiation, downloads models if needed and loads the
-    pipeline. Subsequent instantiations reuse the module-level singleton
-    regardless of constructor arguments (the first configuration wins).
+    首次实例化时，按需下载模型并加载流水线。后续实例化
+    复用模块级单例，与构造参数无关（以首次配置为准）。
 
-    Args:
-        model_path: Optional custom path to Stanza model directory.
-                    If None, uses Stanza's default model directory.
-        lang: Language code (default: 'en' for English).
-              Legal contracts are primarily in English; this default
-              reflects that domain assumption.
-        processors: Comma-separated list of Stanza processors.
-                    Default includes all processors needed for UD analysis:
-                    tokenize, MWT expansion, POS tagging, lemmatization,
-                    and dependency parsing.
-        download_method: Stanza download strategy.
-                         REUSE_RESOURCES avoids re-downloading models
-                         if they already exist on disk.
-        use_gpu: Whether to use GPU acceleration if available.
-                 Set to False for CPU-only environments.
+    参数：
+        model_path: 可选的 Stanza 模型目录自定义路径。
+                    为 None 时使用 Stanza 默认模型目录。
+        lang: 语言代码（默认 'en' 表示英语）。
+              法律合同主要为英文；此默认值反映该领域假设。
+        processors: 逗号分隔的 Stanza 处理器列表。
+                    默认包含 UD 分析所需的全部处理器：
+                    分词、MWT 展开、词性标注、词形还原、依存解析。
+        download_method: Stanza 下载策略。
+                         REUSE_RESOURCES 在模型已存在时避免重复下载。
+        use_gpu: 是否使用 GPU 加速（若可用）。
+                 纯 CPU 环境请设为 False。
     """
     global _nlp, _nlp_initialized
 
-    # --- Singleton pattern: only initialize once ---
-    # Stanza models are large (~500MB for English) and loading them
-    # is expensive. We maintain a single pipeline instance for the
-    # entire process lifetime.
+    # --- 单例模式：仅初始化一次 ---
+    # Stanza 模型体积大（英语约 500MB），加载代价高。
+    # 整个进程生命周期内维持单一流水线实例。
     if _nlp_initialized:
         logger.debug("Reusing existing Stanza pipeline singleton")
         return
@@ -67,9 +62,9 @@ def _init_pipeline(
     try:
         import stanza
 
-        # Ensure models are downloaded before constructing the pipeline.
-        # REUSE_RESOURCES skips download if models already exist.
-        # This is critical for CI/CD and offline environments.
+        # 构造流水线前确保模型已下载。
+        # REUSE_RESOURCES 在模型已存在时跳过下载。
+        # 对 CI/CD 与离线环境至关重要。
         download_kwargs = {"logging_level": "WARNING"}
         pipeline_kwargs = {
             "lang": lang,
@@ -85,9 +80,9 @@ def _init_pipeline(
         stanza.download(lang, **download_kwargs)
         logger.info("Stanza models confirmed for language: %s", lang)
 
-        # Construct the pipeline with all required processors.
-        # depparse uses the 'depparse' processor which produces UD v2
-        # annotations (head, deprel, feats) in CoNLL-U format.
+        # 使用全部所需处理器构造流水线。
+        # depparse 使用 'depparse' 处理器，产出 UD v2
+        # 标注（head、dprel、feats），格式为 CoNLL-U。
         _nlp = stanza.Pipeline(**pipeline_kwargs)
         _nlp_initialized = True
         logger.info("Stanza pipeline initialized successfully")
@@ -103,10 +98,10 @@ def _init_pipeline(
 
 
 def _get_nlp(self=None):
-    """Return the module-level Stanza pipeline singleton.
+    """返回模块级 Stanza 流水线单例。
 
-    Provides access for advanced use cases (e.g., inspecting raw Stanza
-    output). Most users should use parse() and parse_batch() instead.
+    供高级用例访问（如检查原始 Stanza 输出）。
+    大多数用户应使用 parse() 与 parse_batch()。
     """
     global _nlp
     if _nlp is None:
@@ -117,10 +112,10 @@ def _get_nlp(self=None):
 
 
 def _is_available(self=None) -> bool:
-    """Check whether the Stanza pipeline is initialized and ready.
+    """检查 Stanza 流水线是否已初始化并就绪。
 
-    Returns:
-        True if the pipeline singleton is available for parsing.
+    返回：
+        流水线单例可用于解析时返回 True。
     """
     global _nlp_initialized
     return _nlp_initialized

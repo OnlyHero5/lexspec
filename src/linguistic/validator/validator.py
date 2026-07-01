@@ -80,55 +80,66 @@ class ConstraintValidator:
         polarity_detector: Optional[PolarityDetector] = None,
         constraints_path: str = "configs/constraints.yaml",
     ):
-        """Initialize validator with linguistic analysis components.
+        """使用语言学分析组件初始化校验器。
 
-        All components are optional — if not provided, defaults are
-        created. This supports both production use (shared components)
-        and testing (isolated components with mocks).
+        所有组件均为可选 —— 未提供时创建默认实例。
+        既支持生产使用（共享组件），也支持测试（带 mock 的隔离组件）。
 
-        Args:
-            parser: StanzaParser instance. Created if None.
-            condition_extractor: ConditionExtractor instance. Created if None.
-            polarity_detector: PolarityDetector instance. Created if None.
-            constraints_path: Path to constraints YAML for thresholds.
+        参数：
+            parser: StanzaParser 实例。为 None 时自动创建。
+            condition_extractor: ConditionExtractor 实例。为 None 时自动创建。
+            polarity_detector: PolarityDetector 实例。为 None 时自动创建。
+            constraints_path: 阈值配置用的约束 YAML 路径。
         """
         self._parser = parser
         self._condition_extractor = condition_extractor
         self._polarity_detector = polarity_detector
 
-        # Thresholds from configuration.
+        # 来自配置的阈值。
         self._condition_overlap, self._subject_match, self._object_match = (
             load_validation_thresholds(constraints_path)
         )
 
-        # Lazy initialization flags.
+        # 延迟初始化标志。
         self._parser_owned = parser is None
         self._extractor_owned = condition_extractor is None
         self._detector_owned = polarity_detector is None
 
     @property
     def parser(self) -> StanzaParser:
-        """Get or lazily create the StanzaParser."""
+        """获取或延迟创建 Stanza 依存解析器。
+
+        返回:
+            ``StanzaParser`` 实例；若构造时未注入则首次访问时自动创建。
+        """
         if self._parser is None:
             self._parser = StanzaParser()
         return self._parser
 
     @property
     def condition_extractor(self) -> ConditionExtractor:
-        """Get or lazily create the ConditionExtractor."""
+        """获取或延迟创建条件从句提取器。
+
+        返回:
+            ``ConditionExtractor`` 实例，用于从 UD 树识别 advcl+mark 条件边界。
+        """
         if self._condition_extractor is None:
             self._condition_extractor = ConditionExtractor()
         return self._condition_extractor
 
     @property
     def polarity_detector(self) -> PolarityDetector:
-        """Get or lazily create the PolarityDetector."""
+        """获取或延迟创建情态/极性检测器。
+
+        返回:
+            ``PolarityDetector`` 实例，用于从助动词与否定推导法律角色。
+        """
         if self._polarity_detector is None:
             self._polarity_detector = PolarityDetector()
         return self._polarity_detector
 
     # ==================================================================
-    # Main Validation Entry Point — The 7-Step Algorithm
+    # 主校验入口 —— 七步算法
     # ==================================================================
 
     def validate(
@@ -137,24 +148,23 @@ class ConstraintValidator:
         text: str,
         tree: Optional[DependencyTree] = None,
     ) -> ValidationResult:
-        """Run the complete 7-step constraint validation algorithm.
+        """运行完整的七步约束校验算法。
 
-        This is the main entry point for all validation. Delegates to
-        ``run_validation()`` in ``_validate.py`` which orchestrates the
-        7-step pipeline.
+        所有校验的主入口。委托至 ``_validate.py`` 中的
+        ``run_validation()``，由其编排七步流水线。
 
-        Args:
-            triplet: LLM-extracted legal triplet to validate.
-            text: Original contract clause text (exact input sent to LLM).
-            tree: Pre-parsed dependency tree. Parsed from text if None.
+        参数：
+            triplet: 待校验的大语言模型抽取法律三元组。
+            text: 原始合同从句文本（发送给大语言模型的精确输入）。
+            tree: 预解析依存树。为 None 时从 text 解析。
 
-        Returns:
-            ValidationResult with full validation details.
+        返回：
+            含完整校验详情的 ValidationResult。
         """
         return run_validation(self, triplet, text, tree)
 
     # ==================================================================
-    # Depth Analysis — Additional Linguistic Metrics
+    # 深度分析 —— 附加语言学度量
     # ==================================================================
 
     def compute_depth_metrics(
@@ -162,25 +172,23 @@ class ConstraintValidator:
         tree: DependencyTree,
         predicate_idx: int,
     ) -> dict:
-        """Compute additional linguistic depth metrics for analysis.
+        """计算附加语言学深度度量供分析使用。
 
-        These metrics quantify sentence complexity and help explain
-        WHY certain sentences cause LLM extraction errors. Used by
-        the evaluation module for phenomenon-based error analysis.
+        这些度量量化句子复杂度，帮助解释
+        某些句子导致大语言模型抽取错误的原因。
+        供评估模块进行基于现象的错误分析。
 
-        Args:
-            tree: Dependency tree.
-            predicate_idx: 1-based index of the predicate.
+        参数：
+            tree: 依存树。
+            predicate_idx: 谓词的 1 基索引。
 
-        Returns:
-            Dict with keys:
-              - mean_dependency_distance (float): MDD for the sentence.
-              - predicate_to_subject_distance (int): Token distance from
-                predicate to its subject.
-              - predicate_to_object_distance (int): Token distance from
-                predicate to its object.
-              - has_long_distance (bool): Any dependency > 5 tokens.
-              - has_acl_relcl (bool): Relative clause present.
-              - dependency_depth (int): Max depth from root to leaf.
+        返回：
+            含以下键的字典：
+              - mean_dependency_distance (float): 句子的 MDD。
+              - predicate_to_subject_distance (int): 谓词到主语的距离。
+              - predicate_to_object_distance (int): 谓词到宾语的距离。
+              - has_long_distance (bool): 是否存在 >5 词元的依存。
+              - has_acl_relcl (bool): 是否存在关系从句。
+              - dependency_depth (int): 从根到叶的最大深度。
         """
         return compute_depth_metrics(tree, predicate_idx)

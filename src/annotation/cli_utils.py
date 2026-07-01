@@ -1,8 +1,8 @@
 """
-CLI utility functions for the annotation pipeline.
+标注流水线的 CLI 工具函数。
 
-Provides configuration loading, client building, model name resolution,
-output path selection, and annotation deduplication/resume support.
+提供配置加载、客户端构建、模型名解析、
+输出路径选择，以及标注去重/续跑支持。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from src.utils.io import read_jsonl, write_jsonl
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Default file paths
+# 默认文件路径
 # ---------------------------------------------------------------------------
 DEFAULT_TESTSET = "data/processed/lexspec_100.jsonl"
 ANNOT_DIR = "data/annotations"
@@ -34,7 +34,7 @@ GEMMA_REVIEW_QWEN = f"{ANNOT_DIR}/gemma_review_qwen.jsonl"
 GOLD_OUT = "data/processed/gold_triplets.jsonl"
 DISAGREE_OUT = f"{ANNOT_DIR}/needs_human_review.jsonl"
 
-# Model alias mapping -- supports both primary/secondary and specific model names.
+# 模型别名映射 — 同时支持 primary/secondary 与具体模型名。
 MODEL_ALIASES = {
     "gemma": "secondary",
     "qwen": "primary",
@@ -44,17 +44,17 @@ MODEL_ALIASES = {
 
 
 # ======================================================================
-# Utility functions
+# 工具函数
 # ======================================================================
 
 
 def _now_iso() -> str:
-    """Return the current UTC time as an ISO 8601 string."""
+    """返回当前 UTC 时间的 ISO 8601 字符串。"""
     return datetime.now(timezone.utc).isoformat()
 
 
 def load_config(config_path: str) -> dict:
-    """Load a YAML config file; raises FileNotFoundError if missing."""
+    """加载 YAML 配置文件；缺失时抛出 FileNotFoundError。"""
     path = Path(config_path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -63,9 +63,9 @@ def load_config(config_path: str) -> dict:
 
 
 def build_client(config: dict, model_key: str) -> LLMClient:
-    """Build an LLM client for the annotation model identified by model_key.
+    """为 model_key 所标识的标注模型构建 LLM 客户端。
 
-    Delegates to src.utils.config.构建标注客户端 for unified config loading.
+    委托 src.utils.config.构建标注客户端 进行统一配置加载。
     """
     role = MODEL_ALIASES.get(model_key, model_key)
     if role not in ("primary", "secondary"):
@@ -74,7 +74,7 @@ def build_client(config: dict, model_key: str) -> LLMClient:
 
 
 def model_role_name(config: dict, model_key: str) -> str:
-    """Resolve the display name of a model from config."""
+    """从配置解析模型的显示名称。"""
     role = MODEL_ALIASES.get(model_key, model_key)
     ann = config.get("models", {}).get("annotation", {})
     if role == "primary":
@@ -83,7 +83,7 @@ def model_role_name(config: dict, model_key: str) -> str:
 
 
 def output_path_for_model(model_key: str) -> str:
-    """Return the default annotation output path for a model identifier."""
+    """返回模型标识对应的默认标注输出路径。"""
     role = MODEL_ALIASES.get(model_key, model_key)
     if role in ("primary", "qwen"):
         return QWEN_ANNOT
@@ -91,7 +91,7 @@ def output_path_for_model(model_key: str) -> str:
 
 
 def review_output_path(reviewer: str, source: str) -> str:
-    """Return the default review output path for a reviewer/source pair."""
+    """返回审查者/被审查源组合的默认审查输出路径。"""
     rev = MODEL_ALIASES.get(reviewer, reviewer)
     src = MODEL_ALIASES.get(source, source)
     if rev in ("primary", "qwen") and src in ("secondary", "gemma"):
@@ -102,31 +102,31 @@ def review_output_path(reviewer: str, source: str) -> str:
 
 
 def triplet_to_dict(t: LegalTriplet) -> dict:
-    """LegalTriplet -> serializable dict."""
+    """LegalTriplet -> 可序列化 dict。"""
     return t.model_dump(mode="json")
 
 
 def dict_to_triplet(d: dict) -> LegalTriplet:
-    """Dict -> LegalTriplet."""
+    """Dict -> LegalTriplet。"""
     return LegalTriplet.model_validate(d)
 
 
 # ======================================================================
-# Annotation deduplication -- handles duplicates from resume
+# 标注去重 — 处理续跑产生的重复
 # ======================================================================
 
 
 def _deduplicate_annotations(output_path: str) -> int:
-    """Deduplicate an annotation file, keeping the best record per clause_id.
+    """对标注文件去重，每个 clause_id 保留最佳记录。
 
-    Selection strategy: successful records preferred over failures; among
-    same status, the last one is kept. File is overwritten in-place.
+    选择策略：成功记录优先于失败；同状态下保留最后一条。
+    文件原地覆盖。
 
-    Args:
-        output_path: Annotation JSONL file path.
+    参数：
+        output_path: 标注 JSONL 文件路径。
 
-    Returns:
-        Number of duplicate records removed.
+    返回：
+        移除的重复记录数。
     """
     path = Path(output_path)
     if not path.exists():
@@ -145,11 +145,11 @@ def _deduplicate_annotations(output_path: str) -> int:
             best[cid] = rec
         else:
             existing = best[cid]
-            # Success preferred; same status keeps later one.
+            # 成功优先；同状态保留较新的一条。
             if rec.get("success") and not existing.get("success"):
                 best[cid] = rec
             elif not rec.get("success") and existing.get("success"):
-                pass  # Keep existing success record.
+                pass  # 保留已有成功记录。
             else:
                 best[cid] = rec
 
@@ -165,15 +165,14 @@ def _deduplicate_annotations(output_path: str) -> int:
 
 
 # ======================================================================
-# Completed annotation tracking -- for --resume mode
+# 已完成标注跟踪 — 用于 --resume 模式
 # ======================================================================
 
 
 def _load_completed_ids(output_path: str) -> Set[str]:
-    """Read clause_ids of successfully completed annotations from a file.
+    """从文件中读取已成功完成标注的 clause_id。
 
-    Only counts records with success=True and a triplet containing
-    substantive content.
+    仅统计 success=True 且三元组含实质性内容的记录。
     """
     path = Path(output_path)
     if not path.exists():
