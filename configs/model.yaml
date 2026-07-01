@@ -1,0 +1,147 @@
+# =============================================================================
+# LexSpec: Model and Server Configuration
+# =============================================================================
+#
+# Purpose:
+#   This file defines the LLM server connection parameters, model identities,
+#   generation hyperparameters, Stanza NLP pipeline settings, and Reflexion
+#   correction parameters for the LexSpec legal-contract extraction system.
+#
+# Architecture:
+#   All LLM inference runs through a single llama.cpp server instance deployed
+#   locally.  The server hosts multiple model files and exposes an OpenAI-
+#   compatible HTTP API at the base_url below.  Each model is referenced by
+#   its llama.cpp model name (the --model argument used when launching the
+#   server).
+#
+# Model isolation guarantees:
+#   - The experiment model (Qwen3.5 9B) performs the actual extraction task.
+#   - Annotation models (Qwen3.6 27B, Gemma4 31B) are used ONLY for gold-label
+#     generation and are completely isolated from the experiment pipeline.
+#     Their predictions never leak into training, prompting, or evaluation.
+#
+# Sections:
+#   1. server       — llama.cpp connection parameters.
+#   2. models       — model identities grouped by role.
+#   3. generation   — shared LLM sampling parameters.
+#   4. stanza       — Stanza NLP pipeline configuration.
+#   5. reflexion    — Reflexion self-correction parameters.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Server Configuration
+# ---------------------------------------------------------------------------
+# Defines how the Python client reaches the llama.cpp server.  The server
+# must be started separately (e.g., `llama-server -m <model>.gguf --port 8080`)
+# before running any extraction or annotation jobs.
+server:
+  # base_url: The root URL of the llama.cpp OpenAI-compatible API.
+  # Full endpoint: http://10.0.16.254:8080/v1/chat/completions
+  base_url: "http://10.0.16.254:8080/v1"
+
+  # api_key: llama.cpp does not enforce authentication.  The OpenAI client
+  # library requires a non-empty string, so we supply a placeholder.
+  api_key: "not-needed"
+
+  # timeout: Maximum seconds to wait for a single HTTP request to complete.
+  # 1200 s (20 minutes) for large-model annotation on remote server.
+  timeout: 1200
+
+  # max_retries: Number of times to retry a request on transient failures
+  # (connection refused, 5xx responses).  Exponential backoff is handled
+  # by the OpenAI client library.
+  max_retries: 3
+
+# ---------------------------------------------------------------------------
+# 2. Model Identities
+# ---------------------------------------------------------------------------
+# Each model block specifies the llama.cpp model name (passed via --model
+# when launching the server) and a human-readable display name for logging.
+models:
+  # experiment: The model under evaluation.  All extraction experiments use
+  # ONLY this model.  Qwen3.5 9B balances capability with inference speed.
+  experiment:
+    name: "qwen3.5-9b"
+    display_name: "Qwen3.5 9B"
+
+  # annotation: Models used exclusively for gold-standard label generation.
+  # These two models independently annotate each sentence; their outputs are
+  # reconciled to produce the final gold labels.  Neither model participates
+  # in extraction experiments.
+  annotation:
+    # primary: Larger, more capable model — serves as the primary annotator.
+    primary:
+      name: "qwen3.6-27b"
+      display_name: "Qwen3.6 27B"
+
+    # secondary: Second annotator for cross-model agreement and consensus.
+    secondary:
+      name: "gemma-4-31B-it-Q8_0.gguf"
+      display_name: "Gemma 4 31B IT Q8"
+
+# ---------------------------------------------------------------------------
+# 3. Generation Parameters
+# ---------------------------------------------------------------------------
+# Controls the LLM sampling behaviour.  We use deterministic decoding
+# (temperature = 0) throughout for reproducibility.  These settings apply
+# to both extraction and annotation passes unless overridden per-prompt.
+generation:
+  # temperature: 0.0 forces greedy decoding — the model always picks the
+  # highest-probability token.  This eliminates variance across runs and
+  # makes results perfectly reproducible given the same seed and model.
+  temperature: 0.0
+
+  # max_tokens: Upper bound on generated tokens per request.  8192 allows
+  # ample room for structured JSON output and thinking-model reasoning.
+  max_tokens: 8192
+
+  # annotation_max_tokens: Token budget for annotation/review calls.
+  # Thinking models (Gemma 4) may consume tokens in reasoning_content first.
+  annotation_max_tokens: 8192
+
+  # seed: Fixed random seed passed to the llama.cpp server for deterministic
+  # sampling.  Together with temperature=0.0, this guarantees bit-identical
+  # output across repeated runs on the same hardware.
+  seed: 42
+
+# ---------------------------------------------------------------------------
+# 4. Stanza NLP Pipeline
+# ---------------------------------------------------------------------------
+# Stanza (StanfordNLP) provides tokenization, POS tagging, lemmatization,
+# and dependency parsing.  The pipeline runs on CPU and is the primary
+# source of syntactic features for constraint-based validation.
+stanza:
+  # lang: Language code for the Stanza pipeline.  The legal contracts in
+  # this study are in English.
+  lang: "en"
+
+  # processors: Comma-separated list of Stanza processors to load.
+  #   tokenize — sentence splitting and word tokenization
+  #   mwt      — multi-word token expansion (e.g., "don't" → "do not")
+  #   pos      — part-of-speech tagging (UPOS + XPOS + UFeats)
+  #   lemma    — lemmatization (canonical dictionary form)
+  #   depparse — Universal Dependencies (UD) dependency parsing
+  # NER is intentionally omitted; it is not needed for the UD-based
+  # relation extraction pipeline.
+  processors: "tokenize,mwt,pos,lemma,depparse"
+
+  # download_method: "REUSE_RESOURCES" tells Stanza to use cached model
+  # files if already downloaded, avoiding redundant downloads on every run.
+  download_method: "REUSE_RESOURCES"
+
+# ---------------------------------------------------------------------------
+# 5. Reflexion Correction Parameters
+# ---------------------------------------------------------------------------
+# Reflexion is a self-correction mechanism where the model reviews its own
+# extraction output against structured error hints and produces a revised
+# answer.  We cap iterations at 1 to prevent over-correction (where the
+# model "fixes" correct extractions into incorrect ones).
+reflexion:
+  # max_iterations: Maximum number of Reflexion correction passes.  Set to
+  # 1 because pilot experiments showed diminishing returns (and occasional
+  # degradation) beyond a single correction round.
+  max_iterations: 1
+
+  # temperature: Separate temperature for the Reflexion correction step.
+  # Also set to 0.0 for deterministic behavior.
+  temperature: 0.0

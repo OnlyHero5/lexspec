@@ -1,0 +1,365 @@
+# =============================================================================
+# LexSpec: Constraint Rules and Validation Configuration
+# =============================================================================
+#
+# Purpose:
+#   This file defines the complete set of syntactic, semantic, and structural
+#   constraints used by the LexSpec pipeline.  These constraints serve three
+#   roles:
+#
+#   1. **Extraction guidance**: The constraint rules are translated into
+#      structured information appended to the LLM prompt (in the constrained
+#      extraction variant), helping the model ground its predictions in
+#      dependency-parse evidence.
+#
+#   2. **Validation**: After extraction, the validator checks whether the
+#      LLM output respects the dependency-parse structure.  Mismatches
+#      trigger Reflexion correction and are recorded as error categories.
+#
+#   3. **Test set construction**: The phenomenon thresholds control how
+#      sentences are sampled from the corpus to build a balanced test set
+#      covering diverse syntactic phenomena.
+#
+# Sections:
+#   1. ud_relations          — Universal Dependencies relation inventory.
+#   2. condition_markers     — Lexical markers for conditional clauses.
+#   3. modality_rules        — Deontic modality classification rules.
+#   4. validation            — Thresholds for evaluating extraction quality.
+#   5. f1_weights            — Component weights for the weighted F1 metric.
+#   6. normalization         — Text normalization rules for comparison.
+#   7. phenomenon_thresholds — Test set sampling thresholds.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Universal Dependencies Relation Inventory
+# ---------------------------------------------------------------------------
+# These are the UD v2 dependency relations that the LexSpec pipeline
+# inspects during extraction and validation.  Each relation is mapped to
+# its syntactic function with a brief description and example.
+#
+# The mapping is used to:
+#   - Extract candidate subjects and objects from the dependency tree.
+#   - Detect passive voice (nsubj:pass + aux:pass).
+#   - Trace condition boundaries (advcl + mark).
+#   - Identify negation (neg) and modality (aux).
+#   - Handle relative clauses (acl:relcl) embedding predicates.
+ud_relations:
+
+  # --- Subject relations ---
+  active_subject:
+    relation: "nsubj"
+    description: >
+      Nominal subject of an active clause.  The entity performing or
+      experiencing the action.  In "The Buyer shall pay the Price",
+      "Buyer" is the nsubj of "pay".
+
+  active_object:
+    relation: "obj"
+    description: >
+      Direct object of a transitive verb in active voice.  The entity
+      directly affected by the action.  In "The Buyer shall pay the Price",
+      "Price" is the obj of "pay".
+
+  passive_subject:
+    relation: "nsubj:pass"
+    description: >
+      Nominal subject of a passive clause.  This is the PATIENT — the
+      entity that undergoes the action.  In "The Price shall be paid",
+      "Price" is nsubj:pass of "paid".  The logical object.
+
+  passive_agent:
+    relation: "obl:agent"
+    description: >
+      Oblique agent in a passive clause, typically introduced by "by".
+      This is the logical SUBJECT (the doer).  In "The Price shall be
+      paid by the Buyer", "Buyer" is obl:agent of "paid".
+
+  # --- Clause relations ---
+  advcl:
+    relation: "advcl"
+    description: >
+      Adverbial clause modifier.  Introduces a subordinate clause that
+      modifies the main clause, often expressing condition, time, purpose,
+      or reason.  Used to identify condition clause boundaries.
+
+  mark:
+    relation: "mark"
+    description: >
+      Marker introducing a subordinate clause.  The dependent is a
+      subordinating conjunction like "if", "unless", "when", "because".
+      The head is the verb of the subordinate clause.  Used to identify
+      condition types (trigger, temporal, exception).
+
+  # --- Negation and modality ---
+  neg:
+    relation: "neg"
+    description: >
+      Negation modifier.  The dependent is a negation word ("not", "no",
+      "never").  Attached to the negated verb.  Critical for distinguishing
+      obligations from prohibitions.
+
+  aux:
+    relation: "aux"
+    description: >
+      Auxiliary verb.  Modal auxiliaries like "shall", "may", "must",
+      "will", "can" attach to the main verb via this relation.  Used to
+      determine deontic modality type.
+
+  aux_pass:
+    relation: "aux:pass"
+    description: >
+      Passive auxiliary.  Forms of "be" (is, are, was, were, been) that
+      mark passive voice.  Presence of aux:pass together with nsubj:pass
+      confirms a passive construction.
+
+  # --- Relative clauses ---
+  acl_relcl:
+    relation: "acl:relcl"
+    description: >
+      Relative clause modifier of a nominal.  A clause introduced by a
+      relative pronoun ("who", "which", "that") that modifies a noun.
+      May embed a predicate-argument structure inside a noun phrase.
+      Example: "the Seller [who shall deliver the Goods]".
+
+# ---------------------------------------------------------------------------
+# 2. Condition Markers
+# ---------------------------------------------------------------------------
+# Legal contracts employ a variety of subordinating constructions to express
+# conditional relationships.  These markers are organized into three semantic
+# categories:
+#
+#   trigger:   The condition must occur for the main clause to take effect.
+#   temporal:  The main clause takes effect at/after a specified time/event.
+#   exception: The main clause applies unless the condition holds.
+#
+# Each category has a list of `mark_words` — the lemmatized forms of
+# subordinating conjunctions and phrases that signal that category.
+condition_markers:
+
+  # trigger: Classic conditional markers.  The main clause obligation,
+  # permission, or prohibition is contingent on the condition being met.
+  trigger:
+    description: >
+      Event-driven conditions: the main clause applies IF the condition
+      holds.  The prototypical marker is "if".
+    mark_words:
+      - "if"
+      - "in the event that"
+      - "in case"
+      - "provided that"
+      - "on condition that"
+      - "so long as"
+
+  # temporal: Time-driven conditions.  The main clause takes effect WHEN
+  # a specified temporal milestone is reached.
+  temporal:
+    description: >
+      Time-driven conditions: the main clause applies WHEN the temporal
+      event occurs.  These are structurally similar to conditionals and
+      are annotated as conditions in the gold standard.
+    mark_words:
+      - "when"
+      - "upon"
+      - "after"
+      - "once"
+      - "as soon as"
+      - "from the date"
+
+  # exception: Limiting conditions.  The main clause applies UNLESS the
+  # exception condition is met, in which case the main clause is voided.
+  exception:
+    description: >
+      Exception conditions: the main clause applies UNLESS the exception
+      holds.  These invert the typical conditional logic — the default
+      is the main clause applying; the exception removes the obligation.
+    mark_words:
+      - "unless"
+      - "except"
+      - "except where"
+      - "other than"
+      - "save"
+      - "save as"
+
+# ---------------------------------------------------------------------------
+# 3. Modality Rules
+# ---------------------------------------------------------------------------
+# Legal contracts use modal auxiliaries to express deontic meanings:
+# obligations, permissions, and prohibitions.  These rules map each
+# deontic role (obligor, right_holder, prohibited_party) to its defining
+# auxiliary verbs and whether negation is expected.
+#
+# The modality classifier uses these rules to:
+#   - Predict the expected subject role from the auxiliary verb.
+#   - Detect role mismatches during validation (see error_hints.role_mismatch).
+modality_rules:
+
+  # obligor: The party who bears the obligation.  Typically the subject of
+  # a clause with "shall", "must", or an active obligation verb.
+  obligor:
+    description: >
+      The party required to perform the action.  Associated with mandatory
+      language: "shall", "must", "is required to", "agrees to", "undertakes to".
+    aux_verbs:
+      - "shall"
+      - "must"
+      - "will"       # "will" in contracts often expresses obligation, not future
+    negated: false    # Negation converts obligor → prohibited_party
+
+  # right_holder: The party who benefits from a permission or entitlement.
+  # Typically the subject of a clause with "may" or "is entitled to".
+  right_holder:
+    description: >
+      The party who holds a right, permission, or entitlement.  Associated
+      with permissive language: "may", "is entitled to", "has the right to".
+    aux_verbs:
+      - "may"
+      - "can"
+    negated: false    # "may not" converts to prohibition
+
+  # prohibited_party: The party forbidden from acting.  Typically the
+  # subject of a negated obligation ("shall not") or negated permission
+  # ("may not").
+  prohibited_party:
+    description: >
+      The party forbidden from performing the action.  Associated with
+      prohibitive language: "shall not", "may not", "must not", "no ...
+      shall", "neither party shall".
+    aux_verbs:
+      - "shall"
+      - "may"
+      - "must"
+    negated: true     # Prohibition requires negation of a deontic auxiliary
+
+# ---------------------------------------------------------------------------
+# 4. Validation Thresholds
+# ---------------------------------------------------------------------------
+# During validation, extracted text spans are compared against dependency-
+# parse-derived candidates using fuzzy matching.  These thresholds control
+# when a match is accepted vs. flagged as an error.
+validation:
+
+  # condition_overlap: Minimum Jaccard similarity (token set intersection
+  # over union) between the extracted condition text and the dependency-
+  # parse-derived condition span.  Values below this threshold trigger
+  # a condition_boundary error hint.
+  condition_overlap: 0.5
+
+  # subject_match: Minimum fuzzy-match score (token-based, after
+  # normalization) between the extracted subject text and the candidate
+  # noun phrase from the dependency parse.  Values below this threshold
+  # may trigger subject-related error hints (passive_subject, role_mismatch).
+  subject_match: 0.8
+
+  # object_match: Minimum fuzzy-match score between the extracted object
+  # text and the candidate from the dependency parse.  Values below this
+  # threshold may trigger object-related error hints (passive_object,
+  # long_distance_object).
+  object_match: 0.8
+
+# ---------------------------------------------------------------------------
+# 5. Weighted F1 Component Weights
+# ---------------------------------------------------------------------------
+# The LexSpec evaluation metric is a weighted F1 score that decomposes
+# extraction quality into five components.  Each component contributes
+# to the final score according to its weight.
+#
+# The weights reflect the relative importance of each component for legal
+# information extraction:
+#   - Subject text accuracy is most critical (misidentifying the obligated
+#     party has severe downstream consequences).
+#   - Predicate and object are equally important for action identification.
+#   - Condition extraction is somewhat less critical but still significant.
+#   - Subject role classification provides a semantic correctness check.
+#
+# All weights must sum to 1.0.
+f1_weights:
+
+  # subject_text: Weight for exact-match / fuzzy-match accuracy of the
+  # subject's text span.  This is the highest-weighted component because
+  # party identification is the most consequential task in contract analysis.
+  subject_text: 0.35
+
+  # subject_role: Weight for correct classification of the subject's
+  # semantic role (obligor / right_holder / prohibited_party / agent).
+  # Lower weight because role labels have inherent ambiguity in edge cases.
+  subject_role: 0.10
+
+  # predicate: Weight for correct identification of the predicate verb
+  # phrase.  Includes both the main verb and any auxiliaries.
+  predicate: 0.20
+
+  # object: Weight for correct extraction of the object text span.
+  # Symmetric with predicate weight — identifying WHAT must be done
+  # is as important as identifying WHO must do it.
+  object: 0.20
+
+  # condition: Weight for correct extraction of condition clauses.
+  # Slightly lower because not every predicate has a condition.
+  condition: 0.15
+
+# ---------------------------------------------------------------------------
+# 6. Text Normalization Rules
+# ---------------------------------------------------------------------------
+# Before comparing extracted text spans with gold-standard or dependency-
+# parse-derived spans, both sides are normalized.  Normalization eliminates
+# superficial differences that do not affect semantic correctness.
+#
+# Each rule is a boolean flag.  All rules are applied in the order listed
+# when computing fuzzy match scores.
+normalization:
+
+  # remove_articles: Strip leading articles ("a", "an", "the") from noun
+  # phrases.  "the Buyer" and "Buyer" should match.
+  remove_articles: true
+
+  # lemmatize: Reduce words to their dictionary form using Stanza's
+  # lemmatizer.  "delivers" and "deliver" should match.
+  lemmatize: true
+
+  # number_normalization: Convert written numbers to digits and vice versa
+  # for comparison.  "five days" and "5 days" should match.
+  number_normalization: true
+
+  # party_aliases: Expand or normalize party reference aliases defined
+  # in the contract's preamble.  "the Company" and "Acme Corp" should
+  # match if "Company" is defined as "Acme Corp" in the contract.
+  party_aliases: true
+
+# ---------------------------------------------------------------------------
+# 7. Phenomenon Thresholds for Test Set Construction
+# ---------------------------------------------------------------------------
+# The test set is constructed by stratified sampling from the corpus to
+# ensure balanced coverage of key syntactic phenomena.  Each threshold
+# defines the minimum proportion of test sentences that must exhibit a
+# given phenomenon.
+#
+# The sampler iterates over the corpus, classifying each sentence by its
+# dependency-parse features, and fills phenomenon quotas until all
+# thresholds are met.  Remaining slots are filled by random sampling.
+#
+# These thresholds are set based on observed phenomenon frequencies in
+# the CUAD and ContractNLI corpora, adjusted to ensure each category has
+# at least ~20 examples for meaningful statistical comparison.
+phenomenon_thresholds:
+
+  # passive: Minimum proportion of sentences containing passive voice
+  # constructions (detected via aux:pass + nsubj:pass dependency relations).
+  passive: 0.20
+
+  # conditional: Minimum proportion of sentences containing conditional
+  # clauses (detected via advcl + mark with condition_markers).
+  conditional: 0.25
+
+  # relative: Minimum proportion of sentences containing relative clauses
+  # (detected via acl:relcl dependency relation).
+  relative: 0.15
+
+  # long_distance: Minimum proportion of sentences where a predicate and
+  # its object are separated by more than 5 intervening tokens.  These
+  # test the model's ability to handle long-distance dependencies.
+  long_distance: 0.15
+
+  # negation: Minimum proportion of sentences containing negation markers
+  # (detected via neg dependency relation).  Negation is critical for
+  # distinguishing obligations from prohibitions.
+  negation: 0.15

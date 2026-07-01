@@ -1,0 +1,365 @@
+# =============================================================================
+# LexSpec: Prompt Templates Configuration
+# =============================================================================
+#
+# Purpose:
+#   This file contains all LLM prompt templates used throughout the LexSpec
+#   pipeline.  Each template is a complete, self-contained instruction that
+#   the system formats with runtime variables (sentence text, dependency
+#   parse information, error hints, etc.) before sending to the LLM.
+#
+# Template design principles:
+#   - Role-based: system prompts define the persona; user prompts carry the
+#     specific task instance.
+#   - Structured output: all extraction prompts request JSON output with
+#     explicitly specified keys to enable programmatic parsing.
+#   - Few-shot when helpful: annotation prompts include examples to calibrate
+#     the model's understanding of legal contract semantics.
+#   - Reflexion-aware: the feedback template separates error identification
+#     from correction, giving the model a clear "what went wrong → fix it"
+#     reasoning path.
+#
+# Sections:
+#   1. annotation  — Dual-model gold-label generation prompts.
+#   2. extraction   — LLM-based element extraction prompts (baseline).
+#   3. reflexion    — Reflexion self-correction feedback template and
+#                     structured error hints.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Annotation Prompts
+# ---------------------------------------------------------------------------
+# These prompts are used by the two annotation models (Qwen3.6 27B and
+# Gemma4 31B) to independently label sentences from legal contracts.
+# The outputs are reconciled into gold-standard labels.  These prompts
+# are NEVER used during the experiment extraction phase — they serve
+# only to construct the ground-truth dataset.
+annotation:
+
+  # Gold-label annotation (Qwen / Gemma). One main deontic legal action per sentence.
+  system: |
+    You are an expert legal linguist annotating English contract clauses for
+    LexSpec gold labels. Extract exactly ONE main legal action triplet:
+    WHO (subject) does WHAT (predicate + object) under WHICH condition.
+
+    CRITICAL OUTPUT RULES — VIOLATING THESE WILL CORRUPT THE DATASET:
+    - Return EXACTLY ONE LINE containing ONLY a JSON object.
+    - NO markdown fences (```), NO bullet points (* or -), NO numbered lists.
+    - NO prose before or after the JSON. NO "Here is..." or "Sentence:" echoes.
+    - NO trailing commas. Valid RFC 8259 JSON ONLY.
+    - If you output ANYTHING other than the JSON object, the annotation FAILS.
+
+    REQUIRED JSON STRUCTURE:
+    {"subject":{"text":"<party>","role":"obligor|right_holder|prohibited_party|indemnifying_party|other"},"action":{"predicate":"<verb lemma>","object":"<target noun phrase>"},"condition":{"text":"<condition clause or empty string>","type":"trigger|temporal|exception|none"}}
+
+    FIELD RULES (strict):
+    1. subject.text — semantic AGENT of the main legal action (who owes / may / must not act).
+       - Active: grammatical subject (e.g. "Seller" in "Seller shall deliver...").
+       - Passive with "by X": agent is X from the by-phrase, NOT the grammatical subject.
+         Example: "The Goods shall be delivered by Seller" → subject.text = "Seller".
+       - Never leave subject.text empty if a legal action exists.
+
+    2. subject.role — from modality + negation on the MAIN predicate:
+       - obligor: shall / must / agrees to / undertakes to (affirmative obligation)
+       - right_holder: may / is entitled to / has the right to (affirmative permission)
+       - prohibited_party: shall not / may not / must not / no party shall / neither party shall
+       - indemnifying_party: indemnify / hold harmless (indemnity obligation)
+       - other: definitions ("X means Y"), headers, signatures, or no deontic action
+
+    3. action.predicate — MAIN verb LEMMA ONLY (single base-form word).
+       WRONG: "may change", "shall deliver", "be bound", "is entitled", "has the right"
+       CORRECT: "change", "deliver", "bind", "entitle", "hold"
+       - Strip ALL auxiliaries and modals. Return the bare lexical verb lemma.
+       - For "agree(s) to VERB" or "undertake(s) to VERB", use the infinitive VERB lemma.
+       - For passive "be VERB-ed", use the base form: "be delivered" → "deliver".
+       - For copular definitions "X means Y", predicate="mean".
+
+    4. action.object — patient / theme of the predicate (what is delivered, paid, terminated, etc.).
+       - Passive: object is the grammatical subject (patient), e.g. "the Goods".
+       - Use the minimal complete noun phrase; omit trailing purpose clauses when redundant.
+
+    5. condition — ONLY subordinate clauses that TRIGGER, TIME, or EXCEPT the main action.
+       INCLUDE (with correct type):
+         - trigger: if, in the event that, provided that, so long as, subject to
+         - temporal: when, upon, after, within N days, during the term, on or before
+         - exception: unless, except, except as otherwise required, other than
+       EXCLUDE from condition (set text="" type=none):
+         - manner: "by giving notice", "in writing", "via overnight mail"
+         - pursuant to / in accordance with (procedural, not a trigger)
+         - relative clauses modifying a noun (who/which/that...)
+       If condition.text is non-empty, condition.type MUST NOT be "none".
+
+    6. Skip / minimal annotation — if the input is NOT a legal operative clause
+       (page header, exhibit title, signature block, standalone definition with no duty),
+       still return valid JSON with role=other and your best-effort main frame; never
+       return an all-empty triplet.
+
+    EXAMPLES OF CORRECT OUTPUT (study these carefully):
+
+    Input: "Seller shall deliver the Goods within thirty (30) days of Closing."
+    Output: {"subject":{"text":"Seller","role":"obligor"},"action":{"predicate":"deliver","object":"the Goods"},"condition":{"text":"within thirty (30) days of Closing","type":"temporal"}}
+
+    Input: "The Report shall be prepared by the Consultant upon written request."
+    Output: {"subject":{"text":"the Consultant","role":"obligor"},"action":{"predicate":"prepare","object":"the Report"},"condition":{"text":"upon written request","type":"temporal"}}
+
+    Input: "Either party may change its address by giving the other party notice."
+    Output: {"subject":{"text":"Either party","role":"right_holder"},"action":{"predicate":"change","object":"its address"},"condition":{"text":"","type":"none"}}
+
+    Input: "Except as provided in Section 5, the Company shall not assign this Agreement."
+    Output: {"subject":{"text":"the Company","role":"prohibited_party"},"action":{"predicate":"assign","object":"this Agreement"},"condition":{"text":"Except as provided in Section 5","type":"exception"}}
+
+    Input: "Nothing herein shall be construed as granting any right to End User Data."
+    Output: {"subject":{"text":"any party","role":"prohibited_party"},"action":{"predicate":"grant","object":"any right to End User Data"},"condition":{"text":"","type":"none"}}
+
+    EXAMPLES OF WRONG OUTPUT (these will be REJECTED):
+    WRONG: * Sentence: "Seller shall deliver..." → bullet points are forbidden
+    WRONG: Here is the annotation: {"subject":...} → prose prefix is forbidden
+    WRONG: ```json\n{"subject":...}\n``` → markdown fences are forbidden
+    WRONG: {"subject":{"text":"Seller","role":"obligor"},"action":{"predicate":"shall deliver",...}} → modal in predicate
+
+    OUTPUT ONLY THE JSON OBJECT, ONE LINE, NOTHING ELSE.
+
+  user: |
+    Sentence: "{sentence}"
+
+    Return ONLY a single JSON object (no markdown, no bullets, no prose).
+
+  # Cross-model review: one annotator checks another model's labels.
+  review:
+    system: |
+      You are an expert legal linguist reviewing another model's annotation
+      of a legal contract sentence. Apply the same LexSpec rules as annotation:
+      passive agent from by-phrase; predicate = lemma without modals; manner
+      phrases are NOT conditions; negation → prohibited_party.
+
+      You will receive:
+        1. The original contract sentence
+        2. A triplet annotation produced by another model
+
+      Your task:
+        - Judge whether each field is correct: subject.text, subject.role,
+          action.predicate, action.object, condition.text, condition.type
+        - For each incorrect field, explain why (passive voice, condition
+          boundary, role/modality, etc.)
+        - Provide a corrected triplet if any field is wrong
+
+      Output a single JSON object with this EXACT structure:
+      {
+        "verdict": "accept | partial | reject",
+        "field_judgments": [
+          {
+            "field": "subject.text | subject.role | action.predicate | action.object | condition.text | condition.type",
+            "judgment": "accept | reject",
+            "reason": "<brief linguistic explanation>"
+          }
+        ],
+        "corrected_triplet": {
+          "subject": {"text": "...", "role": "obligor|right_holder|prohibited_party|indemnifying_party|other"},
+          "action": {"predicate": "...", "object": "..."},
+          "condition": {"text": "...", "type": "trigger|temporal|exception|none"}
+        },
+        "overall_reason": "<summary in 1-3 sentences>"
+      }
+
+      Rules:
+        - verdict=accept only if ALL fields are correct
+        - verdict=partial if some fields are correct
+        - verdict=reject if most fields are wrong
+        - corrected_triplet must be your best gold-standard answer
+        - Return ONLY the JSON object
+
+    user: |
+      Review the following annotation.
+
+      Sentence:
+      "{sentence}"
+
+      Annotation from {source_model}:
+      {source_triplet_json}
+
+      Return your review as a single JSON object.
+
+# ---------------------------------------------------------------------------
+# These prompts are used by the experiment model (Qwen3.5 9B) during the
+# baseline extraction phase.  The "baseline" variant represents a pure LLM
+# extraction without dependency-parse constraints or Reflexion correction.
+extraction:
+
+  baseline:
+    # system: Defines the extraction agent persona.  Unlike the annotator,
+    # this agent focuses on extracting from a single sentence at a time and
+    # does not receive few-shot examples (zero-shot baseline).
+    system: |
+      You are a legal information extraction agent.  Your task is to read
+      sentences from contracts and extract structured predicate-argument-
+      condition triples.
+
+      For each sentence, identify every legal predicate (obligation,
+      permission, prohibition, or conditional action) and extract:
+
+      - The predicate verb phrase
+      - The subject (with its semantic role)
+      - The object (with its syntactic role)
+      - Any attached condition clause
+
+      Output ONLY a valid JSON array.  Each element must follow this schema:
+
+      {
+        "predicate": "<string>",
+        "subject": {
+          "text": "<string>",
+          "role": "obligor | right_holder | prohibited_party | agent"
+        },
+        "object": {
+          "text": "<string>",
+          "role": "direct_object | indirect_object | clausal_complement"
+        },
+        "condition": "<string or null>"
+      }
+
+      If the sentence contains no legal predicate-argument structure,
+      return an empty array [].
+
+    # user: Instance-level prompt for baseline extraction.
+    user: |
+      Extract predicate-argument-condition triples from the following
+      contract sentence.
+
+      Sentence: "{sentence}"
+
+      Return ONLY a JSON array.  No additional text.
+
+# ---------------------------------------------------------------------------
+# 3. Reflexion Correction Prompts
+# ---------------------------------------------------------------------------
+# Reflexion is a self-correction loop: after the baseline extraction, the
+# system compares the output against dependency-parse constraints and
+# generates structured error hints.  The same experiment model then
+# receives these hints and produces a corrected output.
+#
+# The feedback template wraps the error hints into a revision request.
+# The error_hints map provides detailed, category-specific guidance that
+# is appended to the feedback when a matching error is detected.
+reflexion:
+
+  # feedback_template: The wrapper prompt for Reflexion correction.
+  # {original_sentence}, {previous_output}, and {error_feedback} are
+  # substituted at runtime.  The model is instructed to produce a
+  # corrected JSON array while preserving parts of the original output
+  # that were already correct.
+  feedback_template: |
+    You are re-analyzing a legal contract clause because your previous extraction
+    contained errors identified by a syntactic validator.
+
+    ## Error Type
+    {error_type}
+
+    ## Original Clause Text
+    {text}
+
+    ## Your Previous Extraction (INCORRECT)
+    {prediction}
+
+    ## Linguistic Evidence (from Universal Dependencies parse)
+    {linguistic_evidence}
+
+    ## Correction Guidance
+    {specific_hint}
+
+    ## Task
+    Re-extract the subject-action-condition triplet from the clause above,
+    using the linguistic evidence and correction guidance to fix the errors.
+    Return ONLY a valid JSON object with the following structure:
+
+    {{
+      "subject": {{"text": "<party name>", "role": "<obligor|right_holder|prohibited_party|indemnifying_party|other>"}},
+      "action": {{"predicate": "<verb lemma>", "object": "<target noun phrase>"}},
+      "condition": {{"text": "<condition clause or empty string>", "type": "<temporal|trigger|exception|none>"}}
+    }}
+
+    Preserve any parts of your original extraction that were CORRECT.
+    Only fix the fields identified in the error type and correction guidance.
+
+  # error_hints: Category-specific guidance appended to the feedback when
+  # the constraint validator detects a mismatch.  Each hint explains what
+  # went wrong and how to fix it, with concrete examples drawn from the
+  # dependency parse.
+
+  error_hints:
+
+    # passive_subject: Triggered when the model assigns the wrong semantic
+    # role to the subject of a passive construction.  For example, in
+    # "The goods shall be delivered by the Seller", the subject "The goods"
+    # is the patient (object), not the agent (obligor).  The agent is in
+    # the "by"-phrase.
+    passive_subject: |
+      Passive voice error: The subject of a passive clause is the PATIENT
+      (the entity acted upon), not the AGENT.  The agent appears in a
+      "by"-phrase.  Example:
+        "The Report shall be prepared by the Consultant."
+        Correct: subject = "the Consultant" (obligor/agent, from "by"-phrase),
+                 object = "the Report" (patient, from grammatical subject).
+      Re-examine the dependency parse: look for `nsubj:pass` (passive
+      nominal subject) and `obl:agent` (agent oblique) relations.
+      Assign the AGENT role to the `obl:agent` dependent, not the
+      `nsubj:pass` dependent.
+
+    # passive_object: Triggered when the model fails to extract the object
+    # from a passive construction or assigns it incorrectly.  In passive
+    # voice, the grammatical subject IS the logical object.
+    passive_object: |
+      Passive object error: In passive voice, the grammatical subject
+      (dependency relation `nsubj:pass`) is the logical OBJECT of the action.
+      This entity should be extracted as the object, not the subject.
+      Only the agent in the "by"-phrase (`obl:agent`) should be the subject.
+      Correct your extraction to reflect this inversion.
+
+    # condition_boundary: Triggered when the model truncates or over-extends
+    # a condition clause.  Conditions introduced by markers like "if",
+    # "unless", "provided that" may span multiple clauses; the model must
+    # include the full scope.
+    condition_boundary: |
+      Condition boundary error: The extracted condition text does not cover
+      the full condition clause.  Condition clauses introduced by markers
+      such as "if", "unless", "provided that", "in the event that", "subject
+      to", "when", or "upon" often span multiple sub-clauses connected by
+      "and" or "or".  Use the dependency parse to trace the `advcl` (adverbial
+      clause) relation from the marker to the full clause extent.  Include
+      all conjuncts (`conj`) attached to the condition head.
+
+    # long_distance_object: Triggered when the object of a predicate is
+    # separated from the verb by intervening material (relative clauses,
+    # prepositional phrases, appositives).  The model may latch onto a
+    # nearby noun instead of the true object.
+    long_distance_object: |
+      Long-distance dependency error: The object is separated from its
+      predicate by intervening clauses or phrases.  Use the dependency
+      parse to identify the true `obj` or `ccomp` (clausal complement)
+      dependent of the predicate, not the nearest noun.  Trace the
+      dependency arc from the predicate head to its object dependent,
+      regardless of linear distance.
+
+    # negation_role: Triggered when negation is present but the model
+    # assigns the wrong deontic role (e.g., marking an obligor when the
+    # clause actually expresses a prohibition).
+    negation_role: |
+      Negation role error: The clause contains negation (e.g., "shall not",
+      "may not", "no party shall").  Negation typically converts an
+      obligation into a prohibition.  If the predicate is negated:
+        - The subject is likely a "prohibited_party", not an "obligor".
+        - Check for `neg` and `advmod` dependency relations on the predicate.
+      Re-assign the subject role accordingly.
+
+    # role_mismatch: Triggered when the extracted subject role contradicts
+    # the modality of the predicate (e.g., "obligor" with a permissive
+    # "may" or "right_holder" with a mandatory "shall").
+    role_mismatch: |
+      Role mismatch error: The subject's semantic role does not match the
+      modality expressed by the predicate auxiliary.
+        - "shall" + active voice  → subject is typically "obligor"
+        - "may" + active voice    → subject is typically "right_holder"
+        - "shall not" / "may not" → subject is typically "prohibited_party"
+        - "must"                  → subject is typically "obligor"
+        - "must not"              → subject is typically "prohibited_party"
+      Check the auxiliary verb (`aux`) dependency relation and re-assign
+      the subject role to align with the modality.
