@@ -40,8 +40,6 @@ from collections import Counter
 from pathlib import Path
 from typing import List, Dict, Any
 
-from tqdm import tqdm
-
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -57,6 +55,7 @@ from src.linguistic.validator import ConstraintValidator
 from src.utils.config import 加载模型配置, 构建实验客户端, 构建Stanza解析器
 from src.utils.logging import setup_logging, get_logger
 from src.utils.io import read_jsonl, write_jsonl, save_pydantic_list
+from src.utils.progress import progress_bar
 
 logger = get_logger(__name__)
 
@@ -80,6 +79,7 @@ def 运行Dep流水线(
     config_path: str = "configs/model.yaml",
     prompts_path: str = "configs/prompts.yaml",
     constraints_path: str = "configs/constraints.yaml",
+    progress_path: str | None = None,
 ) -> tuple[List[Dict], List[ValidationResult]]:
     """运行完整 Ours-Dep 流水线: 大语言模型抽取 + UD 校验。
 
@@ -103,7 +103,12 @@ def 运行Dep流水线(
 
     logger.info("开始 Ours-Dep 流水线，共 %d 条条款...", len(test_clauses))
 
-    for clause_record in tqdm(test_clauses, desc="Ours-Dep 流水线", unit="clause"):
+    for clause_record in progress_bar(
+        test_clauses,
+        desc="Ours-Dep 流水线",
+        unit="clause",
+        progress_path=progress_path,
+    ):
         clause_id = clause_record.get("clause_id", "?")
         clause_text = clause_record.get("text", "")
 
@@ -175,12 +180,14 @@ def main() -> None:
     test_clauses = read_jsonl(str(testset_path))
     logger.info("已加载 %d 条测试条款: %s", len(test_clauses), testset_path)
 
-    final_results, validation_results = 运行Dep流水线(
-        test_clauses=test_clauses, config_path=args.config,
-    )
-
     output_dir = Path(args.output_dir) / "predictions"
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    final_results, validation_results = 运行Dep流水线(
+        test_clauses=test_clauses,
+        config_path=args.config,
+        progress_path=str(output_dir / "ours_dep.progress"),
+    )
 
     predictions_path = output_dir / "ours_dep.jsonl"
     write_jsonl(str(predictions_path), final_results)

@@ -9,11 +9,12 @@ CUAD v1 数据加载工具。
 
 from __future__ import annotations
 
+import ast
 import csv
 import json
 import re
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from src.utils.logging import get_logger
 
@@ -24,6 +25,39 @@ _SKIP_COLUMNS = frozenset({
     "Filename", "Document Name", "Document Name-Answer",
     "Parties", "Parties-Answer",
 })
+
+
+def _normalize_cuad_span_text(raw: str) -> Optional[str]:
+    """将 master_clauses.csv 单元格规范为单条条款文本。
+
+    CUAD CSV 中条款常以 Python 列表字符串存储，例如
+    ``\"['May 8, 2014', '8th day of May 2014']\"``。
+    本函数解析列表并取最长片段作为代表性条款文本。
+    """
+    text = (raw or "").strip()
+    if len(text) < 20:
+        return None
+
+    if text.startswith("["):
+        try:
+            parsed = ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            parsed = None
+        if isinstance(parsed, list):
+            parts = [str(item).strip() for item in parsed if str(item).strip()]
+            if not parts:
+                return None
+            text = max(parts, key=len)
+        elif parsed is not None:
+            text = str(parsed).strip()
+        else:
+            # 列表字面量解析失败时，尽量去掉外层括号。
+            text = text.strip("[]").strip().strip("'\"")
+
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) < 20:
+        return None
+    return text
 
 
 def load_cuad_data(cuad_path: str) -> List[str]:
@@ -87,13 +121,12 @@ def load_cuad_spans(master_clauses_path: str) -> List[str]:
             for col, val in row.items():
                 if col in _SKIP_COLUMNS or col.endswith("-Answer"):
                     continue
-                text = (val or "").strip()
-                if len(text) < 20:
+                text = _normalize_cuad_span_text(val or "")
+                if text is None:
                     continue
-                norm = re.sub(r"\s+", " ", text)
-                if norm in seen:
+                if text in seen:
                     continue
-                seen.add(norm)
+                seen.add(text)
                 clauses.append(text)
     logger.info("Loaded %d unique clause fragments from %s", len(clauses), path)
     return clauses

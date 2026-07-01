@@ -43,6 +43,7 @@ def select_balanced_testset(
     random_seed: int,
     long_distance_mdd: float,
     source_label: str = "cuad_v1",
+    progress_path: str | None = None,
 ) -> List[Dict]:
     """通过分层抽样选取覆盖各语言现象的平衡测试集。
 
@@ -67,7 +68,9 @@ def select_balanced_testset(
     rng.shuffle(clauses)
 
     clause_records, phenomenon_pools = build_clause_records(
-        parser, clauses, source_label, long_distance_mdd=long_distance_mdd,
+        parser, clauses, source_label,
+        long_distance_mdd=long_distance_mdd,
+        progress_path=progress_path,
     )
 
     def_indices = {

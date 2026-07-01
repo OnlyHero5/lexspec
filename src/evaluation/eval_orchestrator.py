@@ -12,15 +12,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from tqdm import tqdm
-
 from src.extraction.schema import (
     LegalTriplet, DependencyTree, ValidationResult,
 )
-from src.linguistic.stanza_parser import StanzaParser
 from src.evaluation.data_loading import (
     load_predictions, load_gold_triplets, load_predictions_as_triplets,
-    _load_stanza_config, parse_trees_for_testset,
+    parse_trees_for_testset,
 )
 from src.evaluation.reporting import (
     _primary_phenomenon, _write_summary_csv, _print_comparison_table,
@@ -38,6 +35,7 @@ from src.evaluation.linguistic_metrics import (
 from src.evaluation.significance import (
     run_all_comparisons, stratified_significance,
 )
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 from src.utils.io import read_jsonl, write_json
 
@@ -86,29 +84,13 @@ def run_evaluation(
     # --- 为测试集解析 UD 树（语言学指标所需） ---
     trees: List[DependencyTree] = []
     if testset:
-        logger.info(
-            "Parsing UD trees for %d test clauses (this may take a moment)...",
-            len(testset),
+        metrics_dir = Path(output_dir) / "metrics"
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        trees = parse_trees_for_testset(
+            testset_path=testset_path,
+            config_path=config_path,
+            progress_path=str(metrics_dir / "parse_test_clauses.progress"),
         )
-        # 初始化 Stanza。
-        stanza_cfg = _load_stanza_config(config_path)
-        nlp_parser = StanzaParser(
-            lang=stanza_cfg.get("lang", "en"),
-            processors=stanza_cfg.get("processors",
-                                       "tokenize,mwt,pos,lemma,depparse"),
-            download_method=stanza_cfg.get("download_method", "REUSE_RESOURCES"),
-        )
-        for clause in tqdm(testset, desc="Parsing test clauses", unit="clause"):
-            text = clause.get("text", "")
-            if text.strip():
-                try:
-                    tree = nlp_parser.parse(text)
-                    trees.append(tree)
-                except Exception as exc:
-                    logger.debug("Parse failed for clause: %s", exc)
-                    trees.append(DependencyTree(text=text, tokens=[]))  # 空树
-            else:
-                trees.append(DependencyTree(text="", tokens=[]))
 
     # --- 实验名与预测数据映射 ---
     experiments: Dict[str, List[Dict]] = {
@@ -131,7 +113,12 @@ def run_evaluation(
         logger.info("Computing task metrics (weighted triplet F1)...")
         party_aliases = load_party_aliases(constraints_path)
         f1_weights_path = constraints_path
-        for name, triplets in exp_triplets.items():
+        for name in progress_bar(
+            sorted(exp_triplets.keys()),
+            desc="Task metrics F1",
+            unit="experiment",
+        ):
+            triplets = exp_triplets[name]
             if not triplets:
                 logger.warning("No predictions for %s -- skipping task metrics", name)
                 task_metrics[name] = {}
@@ -175,7 +162,11 @@ def run_evaluation(
     if trees and has_gold and len(trees) == len(gold_triplets):
         logger.info("Computing linguistic metrics...")
 
-        for name in ["baseline", "ours_dep", "ours_reflexion"]:
+        for name in progress_bar(
+            ["baseline", "ours_dep", "ours_reflexion"],
+            desc="Linguistic metrics",
+            unit="experiment",
+        ):
             triplets = exp_triplets.get(name, [])
             if not triplets:
                 linguistic_metrics[name] = {}
@@ -250,7 +241,9 @@ def run_evaluation(
                     _primary_phenomenon(c.get("phenomena", {}))
                     for c in testset[:len(per_sample_scores["baseline"])]
                 ]
-                for phen in phen_names:
+                for phen in progress_bar(
+                    phen_names, desc="Stratified significance", unit="phen",
+                ):
                     try:
                         strat = stratified_significance(
                             scores_a=per_sample_scores["baseline"],

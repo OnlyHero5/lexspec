@@ -40,6 +40,7 @@ from src.evaluation.error_summary import generate_error_id
 from src.evaluation.error_explanations import generate_explanation
 from src.utils.io import append_jsonl, ensure_dir, write_json
 from src.utils.constraints import get_validation_thresholds, load_constraints_config
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -223,7 +224,7 @@ def classify_errors(
 
     error_cases: List[ErrorCase] = []
 
-    for i in range(n):
+    for i in progress_bar(range(n), desc="Classifying errors", unit="sample"):
         pred = predictions[i]
         g = gold[i]
         t = trees[i] if trees is not None else None
@@ -301,7 +302,7 @@ def save_error_cases(
     # 各类别计数供日志。
     counts: Dict[str, int] = {cat: 0 for cat in category_files}
 
-    for case in error_cases:
+    for case in progress_bar(error_cases, desc="Saving error cases", unit="case"):
         # 用 Pydantic model_dump 序列化为 JSON 兼容 dict。
         record = case.model_dump(mode="json")
 

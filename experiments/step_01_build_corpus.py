@@ -123,6 +123,12 @@ def main() -> None:
         default=0,
         help="最多处理的合同段落数（0 = 全部 510 份；默认全部）",
     )
+    parser.add_argument(
+        "--max-clauses",
+        type=int,
+        default=0,
+        help="最多处理的候选条款数（0 = 全部；用于 smoke test，在解析前截断）",
+    )
     args = parser.parse_args()
 
     # --all 快捷模式。
@@ -150,6 +156,10 @@ def main() -> None:
     model_config = 加载模型配置(args.config)
     nlp_parser = 构建Stanza解析器(model_config, args.config)
 
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path = str(output_path.with_suffix(".progress"))
+
     # ---- 加载 CUAD 条款 ----
     if args.source == "spans":
         clauses = load_cuad_spans(args.master_clauses_path)
@@ -160,13 +170,21 @@ def main() -> None:
     else:
         contexts = load_cuad_data(args.cuad_path)
         max_ctx = args.max_contexts if args.max_contexts > 0 else None
-        clauses = split_into_clauses(nlp_parser, contexts, max_contexts=max_ctx)
+        clauses = split_into_clauses(
+            nlp_parser, contexts, max_contexts=max_ctx, progress_path=progress_path,
+        )
         source_label = "cuad_v1_sentences"
+
+    if args.max_clauses and args.max_clauses > 0:
+        clauses = clauses[: args.max_clauses]
+        logger.info("Smoke test: truncated to first %d candidate clauses", len(clauses))
 
     # ---- 条款选择 ----
     if args.selection_mode == "all":
         records, _ = build_clause_records(
-            nlp_parser, clauses, source_label, long_distance_mdd=long_distance_mdd,
+            nlp_parser, clauses, source_label,
+            long_distance_mdd=long_distance_mdd,
+            progress_path=progress_path,
         )
         selected = select_all_clauses(records)
     else:
@@ -180,11 +198,10 @@ def main() -> None:
             random_seed=sampling_cfg["random_seed"],
             long_distance_mdd=long_distance_mdd,
             source_label=source_label,
+            progress_path=progress_path,
         )
 
     # ---- 保存输出 ----
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     write_jsonl(str(output_path), selected)
     logger.info("Saved %d clauses to: %s", len(selected), output_path)
 

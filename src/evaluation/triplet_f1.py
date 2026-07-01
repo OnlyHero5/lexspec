@@ -156,7 +156,7 @@ def compute_triplet_f1(
 
     # 主语文本：词元级 F1。
     st_precision, st_recall, st_f1 = compute_field_f1(
-        pred_subject_texts, gold_subject_texts, match_type="token"
+        pred_subject_texts, gold_subject_texts, match_type="token", show_progress=False,
     )
 
     # 主语角色：分类准确率。
@@ -165,17 +165,17 @@ def compute_triplet_f1(
 
     # 谓词：词元级 F1。
     pr_precision, pr_recall, pr_f1 = compute_field_f1(
-        pred_predicates, gold_predicates, match_type="token"
+        pred_predicates, gold_predicates, match_type="token", show_progress=False,
     )
 
     # 宾语：词元级 F1。
     ob_precision, ob_recall, ob_f1 = compute_field_f1(
-        pred_objects, gold_objects, match_type="token"
+        pred_objects, gold_objects, match_type="token", show_progress=False,
     )
 
     # 条件：词元级 F1。
     co_precision, co_recall, co_f1 = compute_field_f1(
-        pred_conditions, gold_conditions, match_type="token"
+        pred_conditions, gold_conditions, match_type="token", show_progress=False,
     )
 
     # -------------------------------------------------------------------

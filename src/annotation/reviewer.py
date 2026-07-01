@@ -98,11 +98,8 @@ class CrossModelReviewer:
         """
         iterator = items
         if show_progress:
-            try:
-                from tqdm import tqdm
-                iterator = tqdm(items, desc="Reviewing", unit="clause")
-            except ImportError:
-                pass
+            from src.utils.progress import progress_bar
+            iterator = progress_bar(items, desc="Reviewing", unit="clause")
 
         results: List[ReviewResult] = []
         for item in iterator:

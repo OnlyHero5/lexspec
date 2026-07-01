@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, List, Dict, Tuple
 
 from src.extraction.schema import LegalTriplet
 from src.evaluation.text_normalizer import normalize
 from src.utils.constraints import get_f1_weights, load_constraints_config
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -29,6 +30,7 @@ def compute_field_f1(
     weights: Optional[Dict[str, float]] = None,
     constraints_path: str = "configs/constraints.yaml",
     party_aliases: Optional[Dict[str, List[str]]] = None,
+    show_progress: bool = True,
 ) -> Tuple[float, float, float]:
     """计算单个文本字段的精确率、召回率与 F1。"""
     if len(preds) != len(golds):
@@ -45,7 +47,12 @@ def compute_field_f1(
         recall = tp / len(golds) if golds else 0.0
     elif match_type == "token":
         total_prec = total_rec = 0.0
-        for pred, gold in zip(preds, golds):
+        pairs = zip(preds, golds)
+        if show_progress and len(preds) > 1:
+            pairs = progress_bar(
+                pairs, desc="Field token F1", unit="sample", total=len(preds),
+            )
+        for pred, gold in pairs:
             p, r, _ = token_f1(pred, gold, party_aliases=party_aliases)
             total_prec += p
             total_rec += r
@@ -97,7 +104,12 @@ def compute_per_sample_f1(
     w_norm = {k: v / total_weight for k, v in w.items()}
 
     scores: List[float] = []
-    for pred, g in zip(predictions, gold):
+    for pred, g in progress_bar(
+        zip(predictions, gold),
+        desc="Per-sample F1",
+        unit="sample",
+        total=len(predictions),
+    ):
         field_scores: Dict[str, float] = {}
 
         _, _, field_scores["subject_text"] = token_f1(

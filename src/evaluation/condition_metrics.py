@@ -13,6 +13,7 @@ from src.extraction.schema import (
     LegalTriplet, DependencyTree, ValidationResult,
 )
 from src.evaluation.text_normalizer import normalize
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -56,7 +57,12 @@ def compute_condition_iou(
     skipped_no_condition = 0
     skipped_one_side = 0
 
-    for pred, tree in zip(predictions, trees):
+    for pred, tree in progress_bar(
+        zip(predictions, trees),
+        desc="Condition boundary IoU",
+        unit="sample",
+        total=len(predictions),
+    ):
         if tree.token_count == 0:
             continue
 

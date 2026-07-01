@@ -12,6 +12,7 @@ from typing import Optional, List, Dict
 
 from src.extraction.schema import LegalTriplet, DependencyTree
 from src.evaluation.text_normalizer import normalize
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -70,7 +71,14 @@ def compute_passive_recovery_accuracy(
     passive_gold_roles: List[str] = []
     passive_agent_tokens: List[Optional[str]] = []  # 树中 obl:agent 文本
 
-    for i, (pred, tree, g) in enumerate(zip(predictions, trees, gold)):
+    for i, (pred, tree, g) in enumerate(
+        progress_bar(
+            zip(predictions, trees, gold),
+            desc="Detecting passive clauses",
+            unit="sample",
+            total=n,
+        )
+    ):
         # 检测被动：须同时有 nsubj:pass 与 aux:pass。
         has_nsubj_pass = tree.has_deprel("nsubj:pass")
         has_aux_pass = tree.has_deprel("aux:pass")
@@ -104,7 +112,9 @@ def compute_passive_recovery_accuracy(
     false_agent_count = 0
 
     # 获取 nsubj:pass 词元供假施事检测。
-    for idx in passive_indices:
+    for idx in progress_bar(
+        passive_indices, desc="Passive recovery scoring", unit="clause",
+    ):
         pred = predictions[idx]
         tree = trees[idx]
         g = gold[idx]

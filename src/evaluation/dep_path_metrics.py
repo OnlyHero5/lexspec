@@ -13,6 +13,7 @@ from src.extraction.schema import (
     LegalTriplet, DependencyTree, Token,
 )
 from src.evaluation.text_normalizer import normalize
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -58,7 +59,12 @@ def compute_dependency_path_legality(
     total_pairs = 0
     legal_pairs = 0
 
-    for pred, tree in zip(predictions, trees):
+    for pred, tree in progress_bar(
+        zip(predictions, trees),
+        desc="Dependency path legality",
+        unit="sample",
+        total=len(predictions),
+    ):
         # 跳过空树（无词元）— 无法验证路径。
         if tree.token_count == 0:
             continue

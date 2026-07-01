@@ -199,11 +199,8 @@ class LLMAnnotator:
         """
         iterator = clauses
         if show_progress:
-            try:
-                from tqdm import tqdm
-                iterator = tqdm(clauses, desc="Annotating", unit="clause")
-            except ImportError:
-                logger.debug("tqdm not installed -- running without progress bar")
+            from src.utils.progress import progress_bar
+            iterator = progress_bar(clauses, desc="Annotating", unit="clause")
 
         results: List[LegalTriplet] = []
         for i, clause in enumerate(iterator):

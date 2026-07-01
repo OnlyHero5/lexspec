@@ -20,6 +20,7 @@ from src.annotation.cli_utils import (
 from src.annotation.consensus import field_level_consensus
 from src.annotation.normalization import normalize_text
 from src.utils.io import read_jsonl, write_jsonl, ensure_dir
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -213,7 +214,9 @@ def cmd_merge(args) -> None:
         if r.get("success")
     }
 
-    for cid in common_ids:
+    for cid in progress_bar(
+        common_ids, desc="Merging gold triplets", unit="clause",
+    ):
         qr = qwen_recs[cid]
         gr = gemma_recs[cid]
 

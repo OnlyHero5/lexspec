@@ -15,7 +15,7 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _convert_sentence_to_tokens(self, sentence) -> List[Token]:
+def _convert_sentence_to_tokens(sentence) -> List[Token]:
     """将 Stanza Sentence 转换为 LexSpec Token 对象列表。
 
     Stanza API 与 LexSpec 数据模型之间的桥梁。

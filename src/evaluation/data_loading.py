@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from tqdm import tqdm
 
 from src.extraction.schema import LegalTriplet, DependencyTree
 from src.linguistic.stanza_parser import StanzaParser
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 from src.utils.io import read_jsonl, load_pydantic_list
 
@@ -112,6 +112,7 @@ def parse_trees_for_testset(
     testset_path: str,
     config_path: str,
     max_clauses: Optional[int] = None,
+    progress_path: Optional[str] = None,
 ) -> List[DependencyTree]:
     """为测试集中全部子句解析 UD 依存树。
 
@@ -150,7 +151,12 @@ def parse_trees_for_testset(
     trees: List[DependencyTree] = []
 
     logger.info("Parsing UD trees for %d test clauses...", len(clauses))
-    for clause in tqdm(clauses, desc="Parsing test clauses", unit="clause"):
+    for clause in progress_bar(
+        clauses,
+        desc="Parsing test clauses",
+        unit="clause",
+        progress_path=progress_path,
+    ):
         text = clause.get("text", "")
         if text.strip():
             try:

@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 
 import yaml
-from tqdm import tqdm
 
 # --- 将项目根目录加入 sys.path ---
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -57,6 +56,7 @@ from src.evaluation.error_reporting import (
 )
 from src.utils.logging import setup_logging, get_logger
 from src.utils.io import read_jsonl, write_jsonl, write_json, load_pydantic_list
+from src.utils.progress import progress_bar
 
 logger = get_logger(__name__)
 
@@ -125,10 +125,14 @@ def main() -> None:
         )
         sys.exit(0)  # 非致命失败 —— 优雅退出。
 
+    error_dir = Path(args.output_dir) / "error_cases"
+    error_dir.mkdir(parents=True, exist_ok=True)
+
     # --- 解析 UD 树 ---
     trees = parse_trees_for_testset(
         testset_path=args.testset,
         config_path=args.config,
+        progress_path=str(error_dir / "parse_test_clauses.progress"),
     )
 
     # --- 加载各实验的预测结果 ---
@@ -139,13 +143,11 @@ def main() -> None:
         "ours_reflexion": load_predictions(str(pred_dir / "ours_reflexion.jsonl")),
     }
 
-    # --- 对各实验运行错误分析 ---
-    error_dir = Path(args.output_dir) / "error_cases"
-    error_dir.mkdir(parents=True, exist_ok=True)
-
     all_results: Dict[str, Dict[str, Any]] = {}
 
-    for exp_name, preds in experiments.items():
+    for exp_name, preds in progress_bar(
+        experiments.items(), desc="Error analysis", unit="experiment",
+    ):
         if not preds:
             logger.warning("No predictions for %s -- skipping error analysis", exp_name)
             all_results[exp_name] = {

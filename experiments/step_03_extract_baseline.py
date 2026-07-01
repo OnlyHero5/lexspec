@@ -31,8 +31,6 @@ import time
 from pathlib import Path
 from typing import List, Dict
 
-from tqdm import tqdm
-
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -44,6 +42,7 @@ from src.extraction.schema import (
 from src.utils.config import 加载模型配置, 构建实验客户端
 from src.utils.logging import setup_logging, get_logger
 from src.utils.io import read_jsonl, write_jsonl
+from src.utils.progress import progress_bar
 
 logger = get_logger(__name__)
 
@@ -52,6 +51,7 @@ def 运行基线抽取(
     test_clauses: List[Dict],
     config_path: str = "configs/model.yaml",
     prompts_path: str = "configs/prompts.yaml",
+    progress_path: str | None = None,
 ) -> List[Dict]:
     """对测试集中全部条款运行基线大语言模型抽取。
 
@@ -73,7 +73,12 @@ def 运行基线抽取(
     results: List[Dict] = []
     logger.info("开始基线抽取，共 %d 条条款...", len(test_clauses))
 
-    for clause_record in tqdm(test_clauses, desc="基线抽取", unit="clause"):
+    for clause_record in progress_bar(
+        test_clauses,
+        desc="基线抽取",
+        unit="clause",
+        progress_path=progress_path,
+    ):
         clause_id = clause_record.get("clause_id", "?")
         clause_text = clause_record.get("text", "")
 
@@ -137,10 +142,15 @@ def main() -> None:
     test_clauses = read_jsonl(str(testset_path))
     logger.info("已加载 %d 条测试条款: %s", len(test_clauses), testset_path)
 
-    results = 运行基线抽取(test_clauses=test_clauses, config_path=args.config)
-
     output_dir = Path(args.output_dir) / "predictions"
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    results = 运行基线抽取(
+        test_clauses=test_clauses,
+        config_path=args.config,
+        progress_path=str(output_dir / "baseline.progress"),
+    )
+
     output_path = output_dir / "baseline.jsonl"
     write_jsonl(str(output_path), results)
     logger.info("已保存 %d 条基线预测至: %s", len(results), output_path)

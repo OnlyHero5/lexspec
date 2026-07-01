@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any
 
 from src.evaluation.bootstrap import paired_bootstrap
 from src.evaluation.wilcoxon import wilcoxon_test
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -75,37 +76,41 @@ def run_all_comparisons(
     comparisons: Dict[str, Dict] = {}
 
     # 运行全部成对比较。
-    for i in range(len(names)):
-        for j in range(i + 1, len(names)):
-            name_a = names[i]
-            name_b = names[j]
-            key = f"{name_a}_vs_{name_b}"
+    pair_list = [
+        (names[i], names[j])
+        for i in range(len(names))
+        for j in range(i + 1, len(names))
+    ]
+    for name_a, name_b in progress_bar(
+        pair_list, desc="Pairwise comparisons", unit="pair",
+    ):
+        key = f"{name_a}_vs_{name_b}"
 
-            logger.info("Comparing %s vs %s...", name_a, name_b)
+        logger.info("Comparing %s vs %s...", name_a, name_b)
 
-            scores_a = experiment_results[name_a]
-            scores_b = experiment_results[name_b]
+        scores_a = experiment_results[name_a]
+        scores_b = experiment_results[name_b]
 
-            try:
-                bootstrap_result = paired_bootstrap(
-                    scores_a, scores_b, n_resamples=n_resamples, random_seed=random_seed,
-                )
-            except Exception as e:
-                logger.error("Bootstrap failed for %s: %s", key, e)
-                bootstrap_result = {"error": str(e)}
+        try:
+            bootstrap_result = paired_bootstrap(
+                scores_a, scores_b, n_resamples=n_resamples, random_seed=random_seed,
+            )
+        except Exception as e:
+            logger.error("Bootstrap failed for %s: %s", key, e)
+            bootstrap_result = {"error": str(e)}
 
-            try:
-                wilcoxon_result = wilcoxon_test(scores_a, scores_b)
-            except Exception as e:
-                logger.error("Wilcoxon failed for %s: %s", key, e)
-                wilcoxon_result = {"error": str(e)}
+        try:
+            wilcoxon_result = wilcoxon_test(scores_a, scores_b)
+        except Exception as e:
+            logger.error("Wilcoxon failed for %s: %s", key, e)
+            wilcoxon_result = {"error": str(e)}
 
-            comparisons[key] = {
-                "experiment_a": name_a,
-                "experiment_b": name_b,
-                "bootstrap": bootstrap_result,
-                "wilcoxon": wilcoxon_result,
-            }
+        comparisons[key] = {
+            "experiment_a": name_a,
+            "experiment_b": name_b,
+            "bootstrap": bootstrap_result,
+            "wilcoxon": wilcoxon_result,
+        }
 
     # 构建摘要显著性矩阵。
     # 行列为实验名；单元格为显著性指示。

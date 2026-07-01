@@ -11,10 +11,7 @@ import random
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
-from tqdm import tqdm
-
-from src.linguistic.stanza_parser import StanzaParser
-from src.corpus.phenomena_detector import detect_phenomena, is_boilerplate_clause
+from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,6 +21,7 @@ def split_into_clauses(
     parser: StanzaParser,
     contexts: List[str],
     max_contexts: Optional[int] = None,
+    progress_path: Optional[str] = None,
 ) -> List[str]:
     """将段落上下文切分为单句（条款）。
 
@@ -54,7 +52,12 @@ def split_into_clauses(
     import stanza as _stanza  # noqa: F811
 
     for i, ctx in enumerate(
-        tqdm(contexts, desc="Splitting contexts into sentences", unit="ctx")
+        progress_bar(
+            contexts,
+            desc="Splitting contexts into sentences",
+            unit="ctx",
+            progress_path=progress_path,
+        )
     ):
         try:
             doc = parser.nlp(ctx)
@@ -82,6 +85,7 @@ def build_clause_records(
     clauses: List[str],
     source_label: str,
     long_distance_mdd: float,
+    progress_path: Optional[str] = None,
 ) -> Tuple[List[Dict], Dict[str, List[int]]]:
     """解析条款列表并附加语言现象标注。
 
@@ -105,7 +109,12 @@ def build_clause_records(
     logger.info("Parsing %d candidate clauses for phenomenon detection...", len(clauses))
 
     for idx, clause_text in enumerate(
-        tqdm(clauses, desc="Detecting language phenomena", unit="clause")
+        progress_bar(
+            clauses,
+            desc="Detecting language phenomena",
+            unit="clause",
+            progress_path=progress_path,
+        )
     ):
         if is_boilerplate_clause(clause_text):
             continue
