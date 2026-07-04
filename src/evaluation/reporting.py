@@ -178,21 +178,27 @@ def _print_comparison_table(
                 f"{'YES' if bs.get('significant_at_0.05', False) else 'no':>6s}"
             )
 
-    # --- 分层显著性 ---
+    # --- 分层显著性（按实验对嵌套：baseline_vs_ours_dep 等）---
     strat = significance.get("stratified", {})
     if strat:
-        print("\n--- Stratified Significance (Baseline vs Ours-Reflexion by Phenomenon) ---")
-        print(f"{'Phenomenon':<20s} {'N':>5s} {'MeanDiff':>10s} {'p-value':>8s} {'Sig?':>6s}")
-        print("-" * 55)
-        for phen, result in strat.items():
-            if isinstance(result, dict) and "mean_diff" in result:
-                print(
-                    f"{phen:<20s} "
-                    f"{result['subset_size']:>5d} "
-                    f"{result['mean_diff']:>10.4f} "
-                    f"{result['p_value']:>8.4f} "
-                    f"{'YES' if result.get('significant_at_0.05', False) else 'no':>6s}"
-                )
+        for pair_key, phen_results in strat.items():
+            if not isinstance(phen_results, dict):
+                continue
+            print(f"\n--- Stratified Significance ({pair_key} by Phenomenon) ---")
+            print(
+                f"{'Phenomenon':<20s} {'N':>5s} {'MeanDiff':>10s} "
+                f"{'p-value':>8s} {'Sig?':>6s}"
+            )
+            print("-" * 55)
+            for phen, result in phen_results.items():
+                if isinstance(result, dict) and "mean_diff" in result:
+                    print(
+                        f"{phen:<20s} "
+                        f"{result['subset_size']:>5d} "
+                        f"{result['mean_diff']:>10.4f} "
+                        f"{result['p_value']:>8.4f} "
+                        f"{'YES' if result.get('significant_at_0.05', False) else 'no':>6s}"
+                    )
 
     print("\n" + "=" * 72)
     print("EVALUATION COMPLETE")

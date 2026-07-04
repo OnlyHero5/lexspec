@@ -70,7 +70,7 @@ def main() -> None:
     arg_parser.add_argument(
         "--gold",
         type=str,
-        default="data/processed/gold_triplets.jsonl",
+        default="data/processed/gold_triplets_100.jsonl",
         help="金标准三元组 JSONL 文件路径",
     )
     arg_parser.add_argument(

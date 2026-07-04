@@ -119,7 +119,7 @@ def select_balanced_testset(
     result: List[Dict] = []
     for i, idx in enumerate(sorted(selected)):
         record = dict(clause_records[idx])
-        record["clause_id"] = f"C-{i + 1:04d}"
+        record["clause_id"] = f"C-{i + 1:05d}"
         result.append(record)
 
     phen_counts = {

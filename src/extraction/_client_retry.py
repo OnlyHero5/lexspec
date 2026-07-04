@@ -30,6 +30,7 @@ def send_request_with_retry(
     client: Any,
     messages: list[dict[str, str]],
     response_format: Optional[Dict[str, Any]] = None,
+    temperature: Optional[float] = None,
 ) -> str:
     """以重试与退避策略发送聊天补全请求。
 
@@ -67,7 +68,7 @@ def send_request_with_retry(
             kwargs: Dict[str, Any] = {
                 "model": config.model,
                 "messages": messages,
-                "temperature": config.temperature,
+                "temperature": config.temperature if temperature is None else temperature,
                 "max_tokens": config.max_tokens,
                 "seed": config.seed,
             }

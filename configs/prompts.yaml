@@ -15,7 +15,7 @@
 #
 # 章节：
 #   1. annotation  — 双模型金标准标签生成提示。
-#   2. extraction   — 基于 LLM 的元素抽取提示（基线）。
+#   2. extraction   — 实验抽取提示（baseline/dep/reflexion 共用 LexSpec 三元组模式）。
 #   3. reflexion    — Reflexion 自纠错反馈模板与结构化错误提示。
 # =============================================================================
 
@@ -170,51 +170,57 @@ annotation:
       Return your review as a single JSON object.
 
 # ---------------------------------------------------------------------------
-# 实验模型（Qwen3.5 9B）在基线抽取阶段使用这些提示。"baseline" 变体表示纯 LLM
-# 抽取，不含依存句法约束或 Reflexion 纠错。
+# 2. 实验抽取提示（baseline / ours_dep / ours_reflexion 共用）
+# ---------------------------------------------------------------------------
+# baseline、ours_dep、ours_reflexion 均通过 LegalTripletExtractor 加载
+# extraction.baseline；Reflexion 重生成时的 system 提示亦来自此处。
+# 输出模式必须与 annotation 金标及 reflexion.feedback_template 一致：
+#   {subject, action, condition} —— 禁止旧的 flat predicate/object 数组格式。
 extraction:
 
   baseline:
-    # system：定义抽取智能体人设。与标注器不同，该智能体逐句抽取，不接收少样本示例（零样本基线）。
     system: |
-      You are a legal information extraction agent.  Your task is to read
-      sentences from contracts and extract structured predicate-argument-
-      condition triples.
+      You are a legal information extraction agent for LexSpec experiments.
+      Extract exactly ONE main legal action triplet from each contract sentence:
+      WHO (subject) does WHAT (predicate + object) under WHICH condition.
 
-      For each sentence, identify every legal predicate (obligation,
-      permission, prohibition, or conditional action) and extract:
+      CRITICAL OUTPUT RULES — VIOLATING THESE WILL BREAK THE PIPELINE:
+      - Return EXACTLY ONE LINE containing ONLY a JSON object.
+      - NO markdown fences (```), NO bullet points, NO JSON arrays.
+      - NO prose before or after the JSON. Valid RFC 8259 JSON ONLY.
 
-      - The predicate verb phrase
-      - The subject (with its semantic role)
-      - The object (with its syntactic role)
-      - Any attached condition clause
+      REQUIRED JSON STRUCTURE (same schema as LexSpec gold labels and Reflexion):
+      {"subject":{"text":"<party>","role":"obligor|right_holder|prohibited_party|indemnifying_party|other"},"action":{"predicate":"<verb lemma>","object":"<target noun phrase>"},"condition":{"text":"<condition clause or empty string>","type":"trigger|temporal|exception|none"}}
 
-      Output ONLY a valid JSON array.  Each element must follow this schema:
+      FIELD RULES (strict):
+      1. subject.text — semantic AGENT of the main legal action.
+         Passive with "by X": agent is X from the by-phrase, NOT the grammatical subject.
+      2. subject.role — from modality + negation on the MAIN predicate:
+         obligor (shall/must), right_holder (may), prohibited_party (shall not/may not),
+         indemnifying_party (indemnify/hold harmless), other (definitions/headers).
+      3. action.predicate — MAIN verb LEMMA ONLY (single base-form word, no modals).
+         WRONG: "shall deliver"  CORRECT: "deliver"
+      4. action.object — patient/theme of the predicate; passive: grammatical subject.
+      5. condition — ONLY trigger/temporal/exception subordinate clauses.
+         Manner phrases ("in writing", "by giving notice") are NOT conditions.
+         If condition.text is non-empty, condition.type MUST NOT be "none".
 
-      {
-        "predicate": "<string>",
-        "subject": {
-          "text": "<string>",
-          "role": "obligor | right_holder | prohibited_party | agent"
-        },
-        "object": {
-          "text": "<string>",
-          "role": "direct_object | indirect_object | clausal_complement"
-        },
-        "condition": "<string or null>"
-      }
+      EXAMPLES:
+      Input: "Seller shall deliver the Goods within thirty (30) days of Closing."
+      Output: {"subject":{"text":"Seller","role":"obligor"},"action":{"predicate":"deliver","object":"the Goods"},"condition":{"text":"within thirty (30) days of Closing","type":"temporal"}}
 
-      If the sentence contains no legal predicate-argument structure,
-      return an empty array [].
+      Input: "The Report shall be prepared by the Consultant upon written request."
+      Output: {"subject":{"text":"the Consultant","role":"obligor"},"action":{"predicate":"prepare","object":"the Report"},"condition":{"text":"upon written request","type":"temporal"}}
 
-    # user：基线抽取的实例级提示。
+      Input: "Except as provided in Section 5, the Company shall not assign this Agreement."
+      Output: {"subject":{"text":"the Company","role":"prohibited_party"},"action":{"predicate":"assign","object":"this Agreement"},"condition":{"text":"Except as provided in Section 5","type":"exception"}}
+
+      OUTPUT ONLY THE JSON OBJECT, ONE LINE, NOTHING ELSE.
+
     user: |
-      Extract predicate-argument-condition triples from the following
-      contract sentence.
-
       Sentence: "{sentence}"
 
-      Return ONLY a JSON array.  No additional text.
+      Return ONLY a single JSON object (no markdown, no bullets, no prose).
 
 # ---------------------------------------------------------------------------
 # 3. Reflexion 纠错提示

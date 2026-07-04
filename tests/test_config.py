@@ -14,7 +14,8 @@ from src.utils.constraints import (
     load_constraints_config,
     normalize_for_comparison,
 )
-from src.utils.prompt_loader import load_reflexion_config
+from src.utils.config import 获取Reflexion参数, 加载模型配置
+from src.utils.prompt_loader import load_extraction_prompts, load_reflexion_config
 from src.correction.reflexion import ReflexionGenerator
 from src.extraction.client import ClientConfig, LLMClient
 
@@ -77,6 +78,21 @@ class TestPromptsYaml:
         assert system.strip()
         assert "default" in hints
         assert "passive_subject" in hints
+
+    def test_baseline_prompt_uses_lexspec_triplet_schema(self):
+        prompts = load_extraction_prompts(PROMPTS)
+        system = prompts["system"]
+        assert '"action"' in system
+        assert '"predicate"' in system
+        assert "Return ONLY a JSON array" not in system
+        assert "NO JSON arrays" in system
+        assert "Return ONLY a single JSON object" in prompts["user"]
+
+    def test_reflexion_params_from_model_yaml(self):
+        config = 加载模型配置(str(PROJECT_ROOT / "configs" / "model.yaml"))
+        params = 获取Reflexion参数(config)
+        assert params["max_iterations"] == 1
+        assert params["temperature"] == 0.0
 
     def test_reflexion_generator_initializes(self):
         client = LLMClient(

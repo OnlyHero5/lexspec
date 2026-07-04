@@ -1,0 +1,28 @@
+server:
+  base_url: http://10.0.16.254:8080/v1
+  api_key: not-needed
+  timeout: 1200
+  max_retries: 3
+models:
+  experiment:
+    name: gemma-4-31B-it-Q8_0.gguf
+    display_name: Gemma 4 31B IT Q8
+  annotation:
+    primary:
+      name: qwen3.6-27b
+      display_name: Qwen3.6 27B
+    secondary:
+      name: gemma-4-31B-it-Q8_0.gguf
+      display_name: Gemma 4 31B IT Q8
+generation:
+  temperature: 0.0
+  max_tokens: 8192
+  annotation_max_tokens: 8192
+  seed: 42
+stanza:
+  lang: en
+  processors: tokenize,mwt,pos,lemma,depparse
+  download_method: REUSE_RESOURCES
+reflexion:
+  max_iterations: 1
+  temperature: 0.0

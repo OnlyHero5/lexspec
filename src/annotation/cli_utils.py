@@ -25,12 +25,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 默认文件路径
 # ---------------------------------------------------------------------------
-DEFAULT_TESTSET = "data/processed/lexspec_100.jsonl"
+# 正式评测（消融/对比实验）统一使用 curated gold_500 前 100 条：
+#   lexspec_100.jsonl + gold_triplets_100.jsonl（见 scripts/build_gold_100_from_500.py）
+CURATED_TESTSET_100 = "data/processed/lexspec_100.jsonl"
+CURATED_GOLD_100 = "data/processed/gold_triplets_100.jsonl"
+DEFAULT_TESTSET = CURATED_TESTSET_100
 ANNOT_DIR = "data/annotations"
 GEMMA_ANNOT = f"{ANNOT_DIR}/gemma_annotations.jsonl"
 QWEN_ANNOT = f"{ANNOT_DIR}/qwen_annotations.jsonl"
 QWEN_REVIEW_GEMMA = f"{ANNOT_DIR}/qwen_review_gemma.jsonl"
 GEMMA_REVIEW_QWEN = f"{ANNOT_DIR}/gemma_review_qwen.jsonl"
+# 历史双模型 merge 输出（step_02 默认）；与 curated gold_100 评测集无关。
 GOLD_OUT = "data/processed/gold_triplets.jsonl"
 DISAGREE_OUT = f"{ANNOT_DIR}/needs_human_review.jsonl"
 

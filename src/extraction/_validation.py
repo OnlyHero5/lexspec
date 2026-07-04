@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Dict, Any
 
+from src.annotation.triplet_coercion import normalize_to_canonical
 from src.extraction.schema import (
     LegalTriplet,
     Subject,
@@ -46,33 +47,12 @@ def validate_and_normalize_triplet(
     异常:
         ValueError:  若强制转换后仍无法对照 ``LegalTriplet`` 模式校验。
     """
-    # --- 步骤 1：提取并强制转换嵌套字典 ---
-    # 大语言模型输出预期含顶层键 "subject"、"action"、"condition"，
-    # 各含嵌套字典。若键完全缺失则提供空字典（Pydantic 模型将捕获缺失字段）。
-    subject_raw = parsed.get("subject", {})
-    action_raw = parsed.get("action", {})
-    condition_raw = parsed.get("condition", {})
-
-    # 处理 subject/action/condition 为字符串的情况（大语言模型返回纯字符串而非对象的边缘情况）。
-    if isinstance(subject_raw, str):
-        # 大语言模型可能仅返回当事方名称字符串。
-        # 转换为最小字典以避免校验崩溃。
-        logger.debug("subject was a string — converting to dict: %r", subject_raw)
-        subject_raw = {"text": subject_raw, "role": "other"}
-    if isinstance(action_raw, str):
-        logger.debug("action was a string — converting to dict: %r", action_raw)
-        action_raw = {"predicate": action_raw, "object": ""}
-    if isinstance(condition_raw, str):
-        logger.debug("condition was a string — converting to dict: %r", condition_raw)
-        condition_raw = {"text": condition_raw, "type": "none"}
-
-    # 确保为字典（而非列表或其他类型）。
-    if not isinstance(subject_raw, dict):
-        subject_raw = {}
-    if not isinstance(action_raw, dict):
-        action_raw = {}
-    if not isinstance(condition_raw, dict):
-        condition_raw = {}
+    # --- 步骤 1：统一 flat / canonical JSON → LexSpec 字典 ---
+    # 与 annotation、reflexion 共用 triplet_coercion.normalize_to_canonical。
+    canonical = normalize_to_canonical(parsed)
+    subject_raw = canonical.get("subject", {})
+    action_raw = canonical.get("action", {})
+    condition_raw = canonical.get("condition", {})
 
     # --- 步骤 2：规范化枚举字符串值 ---
     # 大语言模型可能以不同大小写返回角色值。

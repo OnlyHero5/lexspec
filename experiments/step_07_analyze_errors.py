@@ -29,33 +29,25 @@ LexSpec 实验 07: 错误分析 —— 语言学错误分类
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
-from itertools import combinations
-from collections import Counter, defaultdict
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List
 
-import yaml
-
-# --- 将项目根目录加入 sys.path ---
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.extraction.schema import (
-    LegalTriplet, DependencyTree, ValidationResult, ErrorCase,
-    ErrorCategory, FieldErrorType,
-)
 from src.evaluation.data_loading import (
-    load_predictions, load_gold_triplets, parse_trees_for_testset,
+    load_gold_records,
+    parse_trees_for_testset,
+    align_experiment_predictions,
 )
+from src.evaluation.alignment import align_to_gold_order, records_to_triplets
 from src.evaluation.error_reporting import (
     analyze_experiment_errors, print_error_comparison_table,
 )
 from src.utils.logging import setup_logging, get_logger
-from src.utils.io import read_jsonl, write_jsonl, write_json, load_pydantic_list
+from src.utils.io import read_jsonl, write_json
 from src.utils.progress import progress_bar
 
 logger = get_logger(__name__)
@@ -82,7 +74,7 @@ def main() -> None:
     arg_parser.add_argument(
         "--gold",
         type=str,
-        default="data/processed/gold_triplets.jsonl",
+        default="data/processed/gold_triplets_100.jsonl",
         help="金标准三元组 JSONL 文件路径",
     )
     arg_parser.add_argument(
@@ -105,12 +97,11 @@ def main() -> None:
     )
     args = arg_parser.parse_args()
 
-    # --- 初始化日志 ---
     import logging as _logging
     setup_logging(log_dir=str(Path(args.output_dir) / "logs"), level=_logging.INFO)
 
-    # --- 加载金标准三元组 ---
-    gold_triplets = load_gold_triplets(args.gold)
+    gold_records = load_gold_records(args.gold)
+    gold_triplets = records_to_triplets(gold_records) if gold_records else []
     if not gold_triplets:
         logger.error(
             "Cannot run error analysis without gold triplets. "
@@ -119,36 +110,34 @@ def main() -> None:
         print(
             "\nWARNING: Gold triplets not found at '%s'.\n"
             "Error analysis requires gold-standard labels to compare against.\n"
-            "Run the annotation pipeline (src/annotation/) to generate gold triplets,\n"
-            "or set --gold to point at an existing gold file.\n"
             % args.gold
         )
-        sys.exit(0)  # 非致命失败 —— 优雅退出。
+        sys.exit(0)
 
     error_dir = Path(args.output_dir) / "error_cases"
     error_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- 解析 UD 树 ---
     trees = parse_trees_for_testset(
         testset_path=args.testset,
         config_path=args.config,
         progress_path=str(error_dir / "parse_test_clauses.progress"),
+        gold_path=args.gold,
     )
 
-    # --- 加载各实验的预测结果 ---
     pred_dir = Path(args.predictions_dir)
-    experiments = {
-        "baseline": load_predictions(str(pred_dir / "baseline.jsonl")),
-        "ours_dep": load_predictions(str(pred_dir / "ours_dep.jsonl")),
-        "ours_reflexion": load_predictions(str(pred_dir / "ours_reflexion.jsonl")),
+    experiment_files = {
+        "baseline": "baseline.jsonl",
+        "ours_dep": "ours_dep.jsonl",
+        "ours_reflexion": "ours_reflexion.jsonl",
     }
 
     all_results: Dict[str, Dict[str, Any]] = {}
 
-    for exp_name, preds in progress_bar(
-        experiments.items(), desc="Error analysis", unit="experiment",
+    for exp_name, filename in progress_bar(
+        experiment_files.items(), desc="Error analysis", unit="experiment",
     ):
-        if not preds:
+        pred_path = pred_dir / filename
+        if not pred_path.exists():
             logger.warning("No predictions for %s -- skipping error analysis", exp_name)
             all_results[exp_name] = {
                 "experiment": exp_name,
@@ -160,9 +149,31 @@ def main() -> None:
             }
             continue
 
+        try:
+            aligned_preds, _ = align_experiment_predictions(
+                args.gold, str(pred_path), strict=True,
+            )
+        except Exception as exc:
+            logger.error("Failed to align %s predictions: %s", exp_name, exc)
+            sys.exit(1)
+
+        if len(aligned_preds) != len(gold_triplets):
+            logger.error(
+                "%s: aligned predictions (%d) != gold (%d)",
+                exp_name, len(aligned_preds), len(gold_triplets),
+            )
+            sys.exit(1)
+
+        if len(trees) != len(gold_triplets):
+            logger.error(
+                "UD trees (%d) != gold (%d) — check testset/gold alignment",
+                len(trees), len(gold_triplets),
+            )
+            sys.exit(1)
+
         result = analyze_experiment_errors(
             experiment_name=exp_name,
-            predictions=preds,
+            predictions=aligned_preds,
             gold=gold_triplets,
             trees=trees,
             output_dir=str(error_dir),
@@ -170,10 +181,8 @@ def main() -> None:
         )
         all_results[exp_name] = result
 
-    # --- 打印跨实验对比表 ---
     print_error_comparison_table(all_results)
 
-    # --- 保存汇总摘要 ---
     aggregate_summary = {
         "experiments": all_results,
         "total_errors_by_experiment": {

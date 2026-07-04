@@ -11,11 +11,16 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from src.evaluation.alignment import (
+    ClauseAlignmentError,
+    align_predictions_to_gold,
+    records_to_triplets,
+)
 from src.extraction.schema import LegalTriplet, DependencyTree
 from src.linguistic.stanza_parser import StanzaParser
 from src.utils.progress import progress_bar
 from src.utils.logging import get_logger
-from src.utils.io import read_jsonl, load_pydantic_list
+from src.utils.io import read_jsonl
 
 logger = get_logger(__name__)
 
@@ -36,6 +41,17 @@ def load_predictions(file_path: str) -> List[Dict]:
     if not path.exists():
         logger.warning(
             "Predictions file '%s' not found -- using empty list", file_path,
+        )
+        return []
+    return read_jsonl(str(path))
+
+
+def load_gold_records(file_path: str) -> List[Dict]:
+    """从 JSONL 加载完整金标记录（含 clause_id、text、phenomena 等）。"""
+    path = Path(file_path)
+    if not path.exists():
+        logger.warning(
+            "GOLD file not found: %s — returning empty list", file_path,
         )
         return []
     return read_jsonl(str(path))
@@ -65,37 +81,187 @@ def load_gold_triplets(file_path: str) -> List[LegalTriplet]:
             file_path,
         )
         return []
-    return load_pydantic_list(str(path), LegalTriplet)
+    return records_to_triplets(load_gold_records(str(path)))
 
 
 def load_predictions_as_triplets(predictions: List[Dict]) -> List[LegalTriplet]:
-    """将预测字典（来自抽取步骤）转换为 LegalTriplet 对象。
+    """将预测字典（来自抽取步骤）转换为 LegalTriplet 对象。"""
+    return records_to_triplets(predictions)
 
-    每个预测字典含 ``triplet`` 键，存放序列化后的 LegalTriplet。
-    反序列化为 Pydantic 模型。
 
-    参数:
-        predictions: 预测字典列表。
+def load_baseline_triplet_map(baseline_path: str) -> Dict[str, LegalTriplet]:
+    """从 baseline.jsonl 加载 clause_id -> LegalTriplet 映射，供消融实验复用初抽。"""
+    records = load_predictions(baseline_path)
+    if not records:
+        return {}
+    return {
+        str(rec["clause_id"]): triplet
+        for rec, triplet in zip(records, records_to_triplets(records))
+        if rec.get("clause_id")
+    }
 
-    返回:
-        LegalTriplet 对象列表。
-    """
-    triplets: List[LegalTriplet] = []
-    for pred in predictions:
-        triplet_data = pred.get("triplet", {})
-        if not triplet_data:
-            triplet = LegalTriplet()
-        else:
-            try:
-                triplet = LegalTriplet.model_validate(triplet_data)
-            except Exception as exc:
-                logger.debug(
-                    "Failed to validate triplet for clause %s: %s",
-                    pred.get("clause_id", "?"), exc,
+
+def require_baseline_triplet_map(
+    baseline_path: str,
+    test_clauses: List[Dict],
+) -> Dict[str, LegalTriplet]:
+    """加载 baseline 初抽并校验覆盖测试集全部非空条款（消融实验强制复用）。"""
+    path = Path(baseline_path)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"消融实验需要 baseline 初抽文件，但未找到: '{baseline_path}'。"
+            "请先运行 step_03_extract_baseline.py。"
+        )
+
+    baseline_map = load_baseline_triplet_map(baseline_path)
+    if not baseline_map:
+        raise ValueError(
+            f"Baseline 文件为空或无法解析: '{baseline_path}'。"
+        )
+
+    expected_ids = [
+        str(rec["clause_id"])
+        for rec in test_clauses
+        if rec.get("clause_id") and str(rec.get("text", "")).strip()
+    ]
+    missing = [cid for cid in expected_ids if cid not in baseline_map]
+    if missing:
+        raise ClauseAlignmentError(
+            f"Baseline 缺少 {len(missing)} 条测试条款的初抽 "
+            f"(示例: {missing[:5]})。请对同一 testset 重新运行 step_03。"
+        )
+
+    extra = sorted(set(baseline_map) - set(expected_ids))
+    if extra:
+        logger.debug(
+            "Baseline 含 %d 条不在当前 testset 中的 clause_id (忽略)",
+            len(extra),
+        )
+
+    logger.info(
+        "已加载 baseline 初抽映射: %d 条 (文件: %s)",
+        len(baseline_map),
+        baseline_path,
+    )
+    return baseline_map
+
+
+def align_experiment_predictions(
+    gold_path: str,
+    prediction_path: str,
+    *,
+    strict: bool = True,
+) -> tuple[List[Dict], List[LegalTriplet]]:
+    """按金标 clause_id 对齐单实验预测，返回 (aligned_records, gold_triplets)。"""
+    gold_records = load_gold_records(gold_path)
+    if not gold_records:
+        return [], []
+    predictions = load_predictions(prediction_path)
+    aligned_preds, aligned_gold_records = align_predictions_to_gold(
+        gold_records, predictions, strict=strict,
+    )
+    return aligned_preds, records_to_triplets(aligned_gold_records)
+
+
+def skipped_validation_record(clause_id: str) -> Dict:
+    """空条款/跳过条款的占位校验记录（与预测行一一对应）。"""
+    return {"clause_id": clause_id, "skipped": True}
+
+
+def validation_result_record(clause_id: str, validation: Any) -> Dict:
+    """将 ValidationResult 包装为带 clause_id 的可序列化记录。"""
+    if hasattr(validation, "model_dump"):
+        payload = validation.model_dump(mode="json")
+    else:
+        payload = validation
+    return {"clause_id": clause_id, "validation": payload}
+
+
+def save_validation_records(path: str, records: List[Dict]) -> None:
+    """保存带 clause_id 的校验记录 JSONL。"""
+    from src.utils.io import write_jsonl
+
+    write_jsonl(path, records)
+
+
+def _parse_validation_result(data: Dict) -> ValidationResult:
+    from src.extraction.schema import ValidationResult
+
+    return ValidationResult.model_validate(data)
+
+
+def _placeholder_validation_result() -> ValidationResult:
+    from src.extraction.schema import (
+        ValidationResult,
+        ValidationStatus,
+        LegalTriplet,
+        LinguisticEvidence,
+    )
+
+    return ValidationResult(
+        status=ValidationStatus.VALID,
+        original_prediction=LegalTriplet(),
+        linguistic_evidence=LinguisticEvidence(),
+        feedback="",
+    )
+
+
+def load_validations_aligned(
+    gold_path: str,
+    validation_path: str,
+    *,
+    strict: bool = True,
+) -> List[ValidationResult]:
+    """按金标 clause_id 顺序加载并对齐校验结果。"""
+    gold_records = load_gold_records(gold_path)
+    if not gold_records:
+        return []
+
+    path = Path(validation_path)
+    if not path.exists():
+        logger.warning("Validations file '%s' not found", validation_path)
+        return []
+
+    raw_records = read_jsonl(str(path))
+    if not raw_records:
+        return []
+
+    # 新格式：每行含 clause_id + validation 或 skipped。
+    if raw_records[0].get("clause_id") is not None:
+        by_id: Dict[str, ValidationResult] = {}
+        for rec in raw_records:
+            cid = str(rec["clause_id"])
+            if rec.get("skipped"):
+                by_id[cid] = _placeholder_validation_result()
+            elif "validation" in rec:
+                by_id[cid] = _parse_validation_result(rec["validation"])
+            else:
+                raise ValueError(
+                    f"Invalid validation record for clause_id={cid}: "
+                    "expected 'validation' or 'skipped'"
                 )
-                triplet = LegalTriplet()
-        triplets.append(triplet)
-    return triplets
+
+        aligned: List[ValidationResult] = []
+        for gold in gold_records:
+            cid = str(gold["clause_id"])
+            if cid not in by_id:
+                if strict:
+                    raise ClauseAlignmentError(
+                        f"Validations missing clause_id '{cid}' present in gold"
+                    )
+                aligned.append(_placeholder_validation_result())
+                continue
+            aligned.append(by_id[cid])
+        return aligned
+
+    # 旧格式：纯 ValidationResult 列表（与金标等长、同序）。
+    legacy = [_parse_validation_result(rec) for rec in raw_records]
+    if strict and len(legacy) != len(gold_records):
+        raise ClauseAlignmentError(
+            f"Legacy validations ({len(legacy)}) != gold ({len(gold_records)}); "
+            "re-run step_04/05 to regenerate clause_id-indexed validations."
+        )
+    return legacy
 
 
 def _load_stanza_config(config_path: str) -> Dict[str, Any]:
@@ -108,49 +274,31 @@ def _load_stanza_config(config_path: str) -> Dict[str, Any]:
     return {}
 
 
-def parse_trees_for_testset(
-    testset_path: str,
-    config_path: str,
-    max_clauses: Optional[int] = None,
-    progress_path: Optional[str] = None,
-) -> List[DependencyTree]:
-    """为测试集中全部子句解析 UD 依存树。
-
-    语言学指标与错误分析需要树结构以确定主错误类别
-    （如检测被动语态、条件从句）。
-
-    参数:
-        testset_path: lexspec_100.jsonl 路径。
-        config_path: model.yaml 路径（Stanza 配置）。
-        max_clauses: 可选，限制解析子句数量。
-
-    返回:
-        DependencyTree 对象列表，与测试集子句 1:1 对应。
-    """
-    testset = read_jsonl(str(testset_path)) if Path(testset_path).exists() else []
-    if not testset:
-        logger.warning("Test set not found -- no UD trees available.")
-        return []
-
-    # 加载 Stanza 配置。
-    config_file = Path(config_path)
-    stanza_cfg: Dict[str, Any] = {}
-    if config_file.exists():
-        with open(config_file, "r", encoding="utf-8") as fh:
-            full_config = yaml.safe_load(fh) or {}
-            stanza_cfg = full_config.get("stanza", {})
-
-    parser = StanzaParser(
+def _build_stanza_parser(config_path: str) -> StanzaParser:
+    """从 model.yaml 构建 StanzaParser。"""
+    stanza_cfg = _load_stanza_config(config_path)
+    return StanzaParser(
         lang=stanza_cfg.get("lang", "en"),
-        processors=stanza_cfg.get("processors",
-                                   "tokenize,mwt,pos,lemma,depparse"),
+        processors=stanza_cfg.get(
+            "processors", "tokenize,mwt,pos,lemma,depparse",
+        ),
         download_method=stanza_cfg.get("download_method", "REUSE_RESOURCES"),
     )
 
-    clauses = testset[:max_clauses] if max_clauses else testset
+
+def parse_trees_for_clauses(
+    clauses: List[Dict],
+    config_path: str,
+    progress_path: Optional[str] = None,
+) -> List[DependencyTree]:
+    """为已对齐的条款记录列表解析 UD 依存树。"""
+    if not clauses:
+        return []
+
+    parser = _build_stanza_parser(config_path)
     trees: List[DependencyTree] = []
 
-    logger.info("Parsing UD trees for %d test clauses...", len(clauses))
+    logger.info("Parsing UD trees for %d clauses...", len(clauses))
     for clause in progress_bar(
         clauses,
         desc="Parsing test clauses",
@@ -160,8 +308,7 @@ def parse_trees_for_testset(
         text = clause.get("text", "")
         if text.strip():
             try:
-                tree = parser.parse(text)
-                trees.append(tree)
+                trees.append(parser.parse(text))
             except Exception as exc:
                 logger.debug("Stanza parse failed: %s", exc)
                 trees.append(DependencyTree(text=text, tokens=[]))
@@ -169,3 +316,36 @@ def parse_trees_for_testset(
             trees.append(DependencyTree(text="", tokens=[]))
 
     return trees
+
+
+def parse_trees_for_testset(
+    testset_path: str,
+    config_path: str,
+    max_clauses: Optional[int] = None,
+    progress_path: Optional[str] = None,
+    gold_path: Optional[str] = None,
+) -> List[DependencyTree]:
+    """为测试集解析 UD 树；若提供 gold_path 则按金标 clause_id 顺序对齐。"""
+    testset = read_jsonl(str(testset_path)) if Path(testset_path).exists() else []
+    if not testset:
+        logger.warning("Test set not found -- no UD trees available.")
+        return []
+
+    if max_clauses is not None:
+        testset = testset[:max_clauses]
+
+    if gold_path:
+        gold_records = load_gold_records(gold_path)
+        if gold_records:
+            from src.evaluation.alignment import align_to_gold_order
+
+            testset = align_to_gold_order(
+                gold_records,
+                testset,
+                other_label="testset",
+                strict=True,
+            )
+
+    return parse_trees_for_clauses(
+        testset, config_path, progress_path=progress_path,
+    )

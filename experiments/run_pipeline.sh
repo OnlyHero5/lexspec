@@ -47,11 +47,11 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# ---------------------------------------------------------------------------
-# 默认值
-# ---------------------------------------------------------------------------
+# 默认评测数据（curated gold_500 前 100 条，见 scripts/build_gold_100_from_500.py）
 CONFIG="${PROJECT_ROOT}/configs/model.yaml"
 CONSTRAINTS="${PROJECT_ROOT}/configs/constraints.yaml"
+TESTSET="${PROJECT_ROOT}/data/processed/lexspec_100.jsonl"
+GOLD="${PROJECT_ROOT}/data/processed/gold_triplets_100.jsonl"
 OUTPUT_DIR="${PROJECT_ROOT}/outputs"
 VENV_PATH="${VENV_PATH:-${PROJECT_ROOT}/.venv}"
 LOG_DIR="${OUTPUT_DIR}/logs"
@@ -300,6 +300,21 @@ main() {
         exit 1
     fi
 
+    # 若已有 curated 100 条金标/测试集，默认跳过 01/02，避免覆盖评测数据
+    if [[ -f "${GOLD}" && -f "${TESTSET}" ]]; then
+        if [[ "${SKIP_01}" != "true" ]]; then
+            echo -e "${BLUE}[信息]${NC} 检测到 curated 评测集，自动跳过步骤 01 (build_corpus)"
+            SKIP_01=true
+        fi
+        if [[ "${SKIP_02}" != "true" ]]; then
+            echo -e "${BLUE}[信息]${NC} 使用 ${GOLD}，自动跳过步骤 02 (annotate_gold)"
+            SKIP_02=true
+        fi
+    else
+        echo -e "${YELLOW}[警告]${NC} 未找到 ${GOLD} 或 ${TESTSET}。"
+        echo -e "         可运行: python3 scripts/build_gold_100_from_500.py"
+    fi
+
     PIPELINE_START="$(date +%s)"
 
     echo ""
@@ -336,7 +351,7 @@ main() {
         run_step "03" "extract_baseline" \
             --config "${CONFIG}" \
             --output-dir "${OUTPUT_DIR}" \
-            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --testset "${TESTSET}" || true
     fi
 
     # ---- 步骤 04: Dep 抽取 ----
@@ -347,7 +362,7 @@ main() {
         run_step "04" "extract_dep" \
             --config "${CONFIG}" \
             --output-dir "${OUTPUT_DIR}" \
-            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --testset "${TESTSET}" || true
     fi
 
     # ---- 步骤 05: Reflexion 抽取 ----
@@ -358,7 +373,7 @@ main() {
         run_step "05" "extract_reflexion" \
             --config "${CONFIG}" \
             --output-dir "${OUTPUT_DIR}" \
-            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --testset "${TESTSET}" || true
     fi
 
     # ---- 步骤 06: 评估 ----
@@ -370,7 +385,9 @@ main() {
             --config "${CONFIG}" \
             --constraints "${CONSTRAINTS}" \
             --output-dir "${OUTPUT_DIR}" \
-            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --predictions-dir "${OUTPUT_DIR}/predictions" \
+            --gold "${GOLD}" \
+            --testset "${TESTSET}" || true
     fi
 
     # ---- 步骤 07: 错误分析 ----
@@ -382,7 +399,9 @@ main() {
             --config "${CONFIG}" \
             --constraints "${CONSTRAINTS}" \
             --output-dir "${OUTPUT_DIR}" \
-            --testset "${PROJECT_ROOT}/data/processed/lexspec_100.jsonl" || true
+            --predictions-dir "${OUTPUT_DIR}/predictions" \
+            --gold "${GOLD}" \
+            --testset "${TESTSET}" || true
     fi
 
     PIPELINE_END="$(date +%s)"

@@ -48,6 +48,8 @@ class ReflexionGenerator:
         client: "LLMClient",
         prompts_path: str = "configs/prompts.yaml",
         constraints_path: str = "configs/constraints.yaml",
+        reflexion_temperature: float = 0.0,
+        max_iterations: int = 1,
     ) -> None:
         """初始化 Reflexion 生成器并加载提示词与阈值配置。
 
@@ -64,6 +66,8 @@ class ReflexionGenerator:
         self.client = client
         self.prompts_path = prompts_path
         self.constraints_path = constraints_path
+        self.reflexion_temperature = reflexion_temperature
+        self.max_iterations = max(1, int(max_iterations))
 
         feedback, system_prompt, error_hints = load_reflexion_config(prompts_path)
         self.reflexion_prompt_template = feedback
@@ -76,11 +80,13 @@ class ReflexionGenerator:
 
         logger.info(
             "ReflexionGenerator initialized (prompts=%s, constraints=%s, hints=%d, "
-            "long_distance_tokens=%d)",
+            "long_distance_tokens=%d, temperature=%.1f, max_iterations=%d)",
             prompts_path,
             constraints_path,
             len(self.error_hints),
             self.long_distance_token_threshold,
+            self.reflexion_temperature,
+            self.max_iterations,
         )
 
     def generate_feedback(
@@ -156,9 +162,10 @@ class ReflexionGenerator:
         feedback_prompt = self.generate_feedback(validation_result, clause)
 
         logger.info("Calling LLM for Reflexion correction on clause: %.80s...", clause)
-        response = self.client.complete(
+        response = self.client.complete_structured(
             system_prompt=self.system_prompt,
             user_prompt=feedback_prompt,
+            temperature=self.reflexion_temperature,
         )
 
         corrected_triplet = parse_llm_response(response)

@@ -139,7 +139,13 @@ class LLMClient:
     # 公开 API
     # -------------------------------------------------------------------------
 
-    def complete(self, system_prompt: str, user_prompt: str) -> str:
+    def complete(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        temperature: Optional[float] = None,
+    ) -> str:
         """发送聊天补全请求并返回响应文本。
 
         构建双消息对话（系统 + 用户），使用 ``ClientConfig`` 中的参数
@@ -170,6 +176,7 @@ class LLMClient:
             config=self.config,
             client=self.client,
             messages=messages,
+            temperature=temperature,
         )
 
     def complete_structured(
@@ -177,6 +184,8 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         json_schema: Optional[Dict[str, Any]] = None,
+        *,
+        temperature: Optional[float] = None,
     ) -> str:
         """发送带结构化 JSON 输出约束的请求。
 
@@ -235,4 +244,5 @@ class LLMClient:
             client=self.client,
             messages=messages,
             response_format=response_format,
+            temperature=temperature,
         )
